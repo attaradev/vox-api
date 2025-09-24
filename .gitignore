@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.env
+*.venv
+env/
+venv/
+ENV/
+
+# Django
+*.log
+db.sqlite3
+/static/
+/media/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Docker
+*.pid
+*.db
+*.sqlite3
+*.sqlite
+
+# General
+*.swp
+*.swo
+.idea/
+*.bak
+*.tmp
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+
+# Pytest
+.pytest_cache/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
