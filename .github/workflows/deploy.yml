@@ -115,14 +115,14 @@ jobs:
         working-directory: ${{ env.TF_WORKDIR }}
         run: |
           set -euo pipefail
-          echo "Extracting ECR repository URL from terraform state..." >&2
-          if ecr_url=$(terraform output -raw ecr_repository_url 2>/dev/null); then
-            echo "Successfully extracted ECR repository URL: $ecr_url" >&2
-            echo "ecr_repository_url=$ecr_url" >> "$GITHUB_OUTPUT"
-          else
-            echo "ECR repository URL not found in terraform state, setting empty" >&2
-            echo "ecr_repository_url=" >> "$GITHUB_OUTPUT"
-          fi
+          echo "Constructing ECR repository URL..." >&2
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGION="${{ env.AWS_REGION }}"
+          # ECR repository name follows the pattern: vox-api-{environment}-api
+          ENV_PART=$(echo "${{ env.DEPLOY_ENV }}" | tr '_' '-')
+          REPO_NAME="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/vox-api-${ENV_PART}-api"
+          echo "Constructed ECR repository URL: $REPO_NAME" >&2
+          echo "ecr_repository_url=$REPO_NAME" >> "$GITHUB_OUTPUT"
 
   terraform_apply:
     name: Terraform Apply
