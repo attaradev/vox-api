@@ -75,6 +75,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [setup]
     permissions: { id-token: write, contents: read }
+    outputs:
+      ecr_repository_url: ${{ steps.extract_ecr_url.outputs.ecr_repository_url || '' }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
@@ -107,6 +109,20 @@ jobs:
           terraform fmt -check
           terraform validate
           terraform plan -out=tfplan -input=false -no-color
+
+      - name: Extract ECR Repository URL
+        id: extract_ecr_url
+        working-directory: ${{ env.TF_WORKDIR }}
+        run: |
+          set -euo pipefail
+          echo "Extracting ECR repository URL from terraform state..." >&2
+          if ecr_url=$(terraform output -raw ecr_repository_url 2>/dev/null); then
+            echo "Successfully extracted ECR repository URL: $ecr_url" >&2
+            echo "ecr_repository_url=$ecr_url" >> "$GITHUB_OUTPUT"
+          else
+            echo "ECR repository URL not found in terraform state, setting empty" >&2
+            echo "ecr_repository_url=" >> "$GITHUB_OUTPUT"
+          fi
 
   terraform_apply:
     name: Terraform Apply
@@ -238,7 +254,7 @@ jobs:
   build_and_push_image:
     name: Build & Push Image
     runs-on: ubuntu-latest
-    needs: [terraform_apply]
+    needs: [terraform_plan, terraform_apply]
     if: needs.terraform_apply.outputs.apply_requested == 'true'
     permissions: { id-token: write, contents: read }
     steps:
@@ -260,7 +276,7 @@ jobs:
         id: ecr_url
         run: |
           set -euo pipefail
-          ECR_REPO_URL="${{ needs.terraform_apply.outputs.ecr_repository_url }}"
+          ECR_REPO_URL="${{ needs.terraform_plan.outputs.ecr_repository_url }}"
           if [ -z "$ECR_REPO_URL" ]; then
             echo "Error: ECR repository URL not available from terraform outputs" >&2
             exit 1
