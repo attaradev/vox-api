@@ -270,67 +270,50 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y jq
 
-      - name: Register new task definition revision (API)
-        id: register_td_api
-        env:
-          ECS_TASK_FAMILY: ${{ needs.terraform_infra.outputs.ecs_task_family }}
-          NEW_IMAGE: ${{ needs.build_and_push_image.outputs.image }}
+      - name: Register task definitions
+        id: register_td
         run: |
           set -euo pipefail
-          if [ -z "$ECS_TASK_FAMILY" ]; then
-            echo "Error: ECS task family output was empty" >&2
-            exit 1
-          fi
-          echo "Registering task definition with image: $NEW_IMAGE" >&2
-          if [ -z "$NEW_IMAGE" ]; then
-            echo "Error: NEW_IMAGE is empty" >&2
-            exit 1
-          fi
-          aws ecs describe-task-definition \
-            --task-definition "$ECS_TASK_FAMILY" \
-            --query 'taskDefinition' > td-api.json
 
-          jq --arg img "$NEW_IMAGE" \
-             '.containerDefinitions[0].image = $img |
-              del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
-             td-api.json > td-api-new.json
+          # Function to register a new task definition revision
+          register_task_definition() {
+            local task_family="$1"
+            local service_name="$2"
+            local output_file="$3"
+            local new_image="$4"
 
-          NEW_TD_ARN=$(aws ecs register-task-definition --cli-input-json file://td-api-new.json --query 'taskDefinition.taskDefinitionArn' --output text)
-          echo "task_definition_arn=$NEW_TD_ARN" >> "$GITHUB_OUTPUT"
+            if [ -z "$task_family" ]; then
+              echo "Error: $service_name task family output was empty" >&2
+              exit 1
+            fi
+            echo "Registering $service_name task definition with image: $new_image" >&2
+            if [ -z "$new_image" ]; then
+              echo "Error: NEW_IMAGE is empty for $service_name" >&2
+              exit 1
+            fi
 
-      - name: Register new task definition revision (Celery)
-        id: register_td_celery
-        env:
-          CELERY_TASK_FAMILY: ${{ needs.terraform_infra.outputs.celery_task_family }}
-          NEW_IMAGE: ${{ needs.build_and_push_image.outputs.image }}
-        run: |
-          set -euo pipefail
-          if [ -z "$CELERY_TASK_FAMILY" ]; then
-            echo "Error: Celery task family output was empty" >&2
-            exit 1
-          fi
-          echo "Registering Celery task definition with image: $NEW_IMAGE" >&2
-          if [ -z "$NEW_IMAGE" ]; then
-            echo "Error: NEW_IMAGE is empty for Celery" >&2
-            exit 1
-          fi
-          aws ecs describe-task-definition \
-            --task-definition "$CELERY_TASK_FAMILY" \
-            --query 'taskDefinition' > td-celery.json
+            aws ecs describe-task-definition \
+              --task-definition "$task_family" \
+              --query 'taskDefinition' > "$output_file.json"
 
-          jq --arg img "$NEW_IMAGE" \
-             '.containerDefinitions[0].image = $img |
-              del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
-             td-celery.json > td-celery-new.json
+            jq --arg img "$new_image" \
+               '.containerDefinitions[0].image = $img |
+                del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+               "$output_file.json" > "${output_file}-new.json"
 
-          NEW_TD_ARN=$(aws ecs register-task-definition --cli-input-json file://td-celery-new.json --query 'taskDefinition.taskDefinitionArn' --output text)
-          echo "task_definition_arn=$NEW_TD_ARN" >> "$GITHUB_OUTPUT"
+            NEW_TD_ARN=$(aws ecs register-task-definition --cli-input-json file://"${output_file}-new.json" --query 'taskDefinition.taskDefinitionArn' --output text)
+            echo "${service_name}_task_definition_arn=$NEW_TD_ARN" >> "$GITHUB_OUTPUT"
+          }
+
+          NEW_IMAGE="${{ needs.build_and_push_image.outputs.image }}"
+          register_task_definition "${{ needs.terraform_infra.outputs.ecs_task_family }}" "api" "td-api" "$NEW_IMAGE"
+          register_task_definition "${{ needs.terraform_infra.outputs.celery_task_family }}" "celery" "td-celery" "$NEW_IMAGE"
 
       - name: Update ECS API service
         env:
           ECS_CLUSTER: ${{ needs.terraform_infra.outputs.ecs_cluster_name }}
           ECS_SERVICE: ${{ needs.terraform_infra.outputs.ecs_service_name }}
-          TASK_DEF_ARN: ${{ steps.register_td_api.outputs.task_definition_arn }}
+          TASK_DEF_ARN: ${{ steps.register_td.outputs.api_task_definition_arn }}
         run: |
           set -euo pipefail
           if [ -z "$ECS_CLUSTER" ] || [ -z "$ECS_SERVICE" ]; then
@@ -350,7 +333,7 @@ jobs:
         env:
           ECS_CLUSTER: ${{ needs.terraform_infra.outputs.ecs_cluster_name }}
           CELERY_SERVICE: ${{ needs.terraform_infra.outputs.celery_service_name }}
-          CELERY_TASK_DEF_ARN: ${{ steps.register_td_celery.outputs.task_definition_arn }}
+          CELERY_TASK_DEF_ARN: ${{ steps.register_td.outputs.celery_task_definition_arn }}
         run: |
           set -euo pipefail
           if [ -z "$ECS_CLUSTER" ] || [ -z "$CELERY_SERVICE" ]; then
