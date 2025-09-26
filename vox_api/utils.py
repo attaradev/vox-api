@@ -4,6 +4,11 @@ from rest_framework.views import exception_handler
 
 
 def custom_exception_handler(exc, context):
+    # Don't modify responses from drf_spectacular views
+    view = context.get("view")
+    if view and view.__class__.__module__.startswith("drf_spectacular"):
+        return exception_handler(exc, context)
+
     response = exception_handler(exc, context)
     if response is not None:
         # Add a consistent error structure

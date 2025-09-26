@@ -9,6 +9,7 @@
 - Subscription billing powered by dj-stripe with webhook handlers and usage tracking
 - Celery + Redis workers for async jobs (email, notifications, heavy tasks) and Flower monitoring
 - Sentry-ready error hooks, health checks, and Docker-first tooling for dependable deployments
+- Adaptive caching for high-traffic poll endpoints with Redis support and automatic invalidation
 - **Consolidated Terraform infrastructure** for AWS cloud deployment with dedicated API and Celery services
 
 ## Prerequisites
@@ -172,8 +173,18 @@ The infrastructure includes both API and Celery worker services, providing compl
 | `POSTGRES_*` | Connection settings for the Postgres service |
 | `DATABASE_URL` | Optional full DSN for direct connections |
 | `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` | Celery broker/result backend (defaults to in-memory; set real services for production) |
+| `CACHE_URL` | Optional explicit cache backend URL (defaults to Redis with DB 1 when Redis is configured) |
+| `CACHE_REDIS_DB` | Redis logical database used for caching (default: `1`) |
+| `CACHE_DEFAULT_TIMEOUT` | Default cache TTL in seconds (default: `300`) |
+| `POLL_CACHE_TIMEOUT` | Override TTL for poll list/detail caches (default: `CACHE_DEFAULT_TIMEOUT`) |
 | `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` | SMTP credentials for transactional email |
 | `FRONTEND_URL` | Frontend base URL used in password reset links |
+
+### Response caching
+
+- Poll list and detail endpoints now cache serialized responses using Redis when available, falling back to in-memory storage automatically.
+- Cache entries are evicted on poll, question, choice, or vote updates, including reorder operations, to ensure fresh payloads.
+- Tune cache behaviour with `CACHE_DEFAULT_TIMEOUT` or `POLL_CACHE_TIMEOUT`, or point `CACHE_URL` at a managed Redis deployment for production workloads.
 
 ## Project Layout
 

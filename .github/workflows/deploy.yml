@@ -4,408 +4,375 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Deployment environment (e.g. production, staging)"
+        description: "Deployment environment (e.g., production, staging)"
         required: false
         default: production
-      auto_apply:
-        description: "Apply Terraform changes and deploy"
+      frontend_url:
+        description: "Frontend base URL for password reset links"
         required: false
-        default: "false"
+        default: "https://your-frontend"
+      email_host:
+        description: "SMTP host for email (ignored if SES SMTP is enabled)"
+        required: false
+        default: "smtp.gmail.com"
+      email_port:
+        description: "SMTP port for email (ignored if SES SMTP is enabled)"
+        required: false
+        default: "587"
+      email_host_user:
+        description: "SMTP username (ignored if SES SMTP is enabled)"
+        required: false
+        default: ""
+      email_host_password:
+        description: "SMTP password (ignored if SES SMTP is enabled)"
+        required: false
+        default: ""
+      django_allowed_hosts:
+        description: "Comma-separated list of allowed hosts"
+        required: false
+        default: "localhost,127.0.0.1"
 
 concurrency:
   group: deploy-${{ github.workflow }}-${{ github.event.inputs.environment || 'production' }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   AWS_REGION: us-east-1
   TF_WORKDIR: infra/terraform
   TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
   DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
+  PROJECT_NAME: vox-api
 
 jobs:
-  setup:
-    name: Setup Environment
+  get_terraform_outputs:
+    name: Get Terraform Outputs
     runs-on: ubuntu-latest
     permissions: { id-token: write, contents: read }
     outputs:
-      tf_backend_key: ${{ steps.setup.outputs.tf_backend_key }}
+      ecs_cluster_name: ${{ steps.outs.outputs.ecs_cluster_name || '' }}
+      ecs_service_name: ${{ steps.outs.outputs.ecs_service_name || '' }}
+      ecs_task_family: ${{ steps.outs.outputs.ecs_task_family || '' }}
+      celery_service_name: ${{ steps.outs.outputs.celery_service_name || '' }}
+      celery_task_family: ${{ steps.outs.outputs.celery_task_family || '' }}
+      ecr_repository_url: ${{ steps.outs.outputs.ecr_repository_url || '' }}
+      django_secret_key_ssm_name: ${{ steps.outs.outputs.django_secret_key_ssm_name || '' }}
+      database_url: ${{ steps.outs.outputs.database_url || '' }}
+      database_url_ssm_name: ${{ steps.outs.outputs.database_url_ssm_name || '' }}
+      postgres_db: ${{ steps.outs.outputs.postgres_db || '' }}
+      postgres_user: ${{ steps.outs.outputs.postgres_user || '' }}
+      postgres_password: ${{ steps.outs.outputs.postgres_password || '' }}
+      postgres_host: ${{ steps.outs.outputs.postgres_host || '' }}
+      postgres_port: ${{ steps.outs.outputs.postgres_port || '' }}
+      redis_url: ${{ steps.outs.outputs.redis_url || '' }}
+      redis_reader_url: ${{ steps.outs.outputs.redis_reader_url || '' }}
+      redis_auth_token: ${{ steps.outs.outputs.redis_auth_token || '' }}
+      redis_primary_endpoint: ${{ steps.outs.outputs.redis_primary_endpoint || '' }}
+      static_bucket_name: ${{ steps.outs.outputs.static_bucket_name || '' }}
+      media_bucket_name: ${{ steps.outs.outputs.media_bucket_name || '' }}
+      stripe_secret_key: ${{ steps.outs.outputs.stripe_secret_key || '' }}
+      stripe_webhook_secret: ${{ steps.outs.outputs.stripe_webhook_secret || '' }}
+      ses_smtp_username: ${{ steps.outs.outputs.ses_smtp_username || '' }}
+      ses_smtp_password: ${{ steps.outs.outputs.ses_smtp_password || '' }}
+      application_environment: ${{ steps.outs.outputs.application_environment || '{}' }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
 
-      - name: AWS Setup
-        uses: ./.github/actions/aws-setup
+      - uses: ./.github/actions/aws-setup
         with:
-          aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
-
-      - name: Prepare environment variables
-        id: setup
-        run: |
-          set -euo pipefail
-          TF_BACKEND_KEY="state/${{ env.DEPLOY_ENV }}/terraform.tfstate"
-          echo "tf_backend_key=${TF_BACKEND_KEY}" >> "$GITHUB_OUTPUT"
-          echo "TF_BACKEND_KEY=${TF_BACKEND_KEY}" >> "$GITHUB_ENV"
-          echo "TF_VAR_environment=${{ env.DEPLOY_ENV }}" >> "$GITHUB_ENV"
-          echo "TF_VAR_additional_tags={\"DeployedBy\":\"GitHubActions\",\"Workflow\":\"${GITHUB_WORKFLOW}\",\"RunId\":\"${GITHUB_RUN_ID}\",\"CommitSHA\":\"${GITHUB_SHA}\"}" >> "$GITHUB_ENV"
-
-      - name: Ensure Terraform state bucket
-        env:
-          BUCKET: ${{ env.TF_STATE_BUCKET }}
-          REGION: ${{ env.AWS_REGION }}
-        run: |
-          set -euo pipefail
-          if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
-            echo "Bucket exists."
-          else
-            if [ "$REGION" = "us-east-1" ]; then
-              aws s3api create-bucket --bucket "$BUCKET"
-            else
-              aws s3api create-bucket --bucket "$BUCKET" --create-bucket-configuration LocationConstraint="$REGION"
-            fi
-            aws s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled
-            aws s3api put-bucket-encryption --bucket "$BUCKET" --server-side-encryption-configuration '{
-              "Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
-            aws s3api put-public-access-block --bucket "$BUCKET" --public-access-block-configuration '{
-              "BlockPublicAcls":true,"IgnorePublicAcls":true,"BlockPublicPolicy":true,"RestrictPublicBuckets":true}'
-          fi
-
-  terraform_plan:
-    name: Terraform Plan
-    runs-on: ubuntu-latest
-    needs: [setup]
-    permissions: { id-token: write, contents: read }
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 1, persist-credentials: false }
-
-      - name: AWS Setup
-        uses: ./.github/actions/aws-setup
-        with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
 
-      - name: Terraform Setup
-        uses: ./.github/actions/terraform-setup
+      - uses: ./.github/actions/terraform-setup
         with:
           working-directory: ${{ env.TF_WORKDIR }}
           state-bucket: ${{ env.TF_STATE_BUCKET }}
-          backend-key: ${{ needs.setup.outputs.tf_backend_key }}
+          backend-key: state/${{ env.DEPLOY_ENV }}/terraform.tfstate
           environment: ${{ env.DEPLOY_ENV }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Select Terraform workspace
+      - name: Select Workspace
         working-directory: ${{ env.TF_WORKDIR }}
         run: |
           set -euo pipefail
-          terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null || terraform workspace new "${{ env.DEPLOY_ENV }}"
 
-      - name: Terraform Validate & Plan
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: |
-          set -euo pipefail
-          terraform fmt -check
-          terraform validate
-          terraform plan -out=tfplan -input=false -no-color
-
-  terraform_apply:
-    name: Terraform Apply
-    runs-on: ubuntu-latest
-    needs: [terraform_plan]
-    permissions: { id-token: write, contents: read }
-    outputs:
-      apply_requested: ${{ steps.apply_mode.outputs.auto_apply }}
-      ecs_cluster_name: ${{ steps.outputs_step.outputs.ecs_cluster_name || '' }}
-      ecs_service_name: ${{ steps.outputs_step.outputs.ecs_service_name || '' }}
-      ecs_task_family: ${{ steps.outputs_step.outputs.ecs_task_family || '' }}
-      celery_service_name: ${{ steps.outputs_step.outputs.celery_service_name || '' }}
-      celery_task_family: ${{ steps.outputs_step.outputs.celery_task_family || '' }}
-      ecr_repository_url: ${{ steps.outputs_step.outputs.ecr_repository_url || '' }}
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 1, persist-credentials: false }
-
-      - name: Configure AWS (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          role-session-name: gh-actions-${{ github.run_id }}
-          mask-aws-account-id: true
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
-        with: { terraform_wrapper: false }
-
-      - name: Determine apply mode
-        id: apply_mode
-        run: |
-          AUTO_APPLY_INPUT="${{ github.event.inputs.auto_apply || 'false' }}"
-          AUTO_APPLY=$(echo "$AUTO_APPLY_INPUT" | tr '[:upper:]' '[:lower:]')
-          if [[ "$AUTO_APPLY" != "true" ]]; then
-            AUTO_APPLY="false"
+          # Discover AWS account id at runtime (needed to build SSM ARNs if TF only provides parameter names)
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
+          echo "Resolved AWS account id: ${AWS_ACCOUNT_ID}"
+          if ! terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null; then
+            echo "Error: Workspace '${{ env.DEPLOY_ENV }}' does not exist. Please run the infrastructure workflow first."
+            exit 1
           fi
-          echo "Auto-apply set to $AUTO_APPLY"
-          echo "auto_apply=$AUTO_APPLY" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare Terraform backend variables
-        run: |
-          set -euo pipefail
-          TF_BACKEND_KEY="state/${{ env.DEPLOY_ENV }}/terraform.tfstate"
-          echo "TF_BACKEND_KEY=${TF_BACKEND_KEY}" >> "$GITHUB_ENV"
-          echo "TF_VAR_environment=${{ env.DEPLOY_ENV }}" >> "$GITHUB_ENV"
-          echo "TF_VAR_additional_tags={\"DeployedBy\":\"GitHubActions\",\"Workflow\":\"${GITHUB_WORKFLOW}\",\"RunId\":\"${GITHUB_RUN_ID}\",\"CommitSHA\":\"${GITHUB_SHA}\"}" >> "$GITHUB_ENV"
-
-      - name: Terraform Init (with backend)
-        working-directory: ${{ env.TF_WORKDIR }}
-        env:
-          BUCKET: ${{ env.TF_STATE_BUCKET }}
-        run: |
-          set -euo pipefail
-          terraform init -reconfigure -input=false \
-            -backend-config="bucket=$BUCKET" \
-            -backend-config="key=${TF_BACKEND_KEY}" \
-            -backend-config="region=${{ env.AWS_REGION }}"
-
-      - name: Select Terraform workspace
+      - name: Get Terraform outputs
+        id: outs
         working-directory: ${{ env.TF_WORKDIR }}
         run: |
           set -euo pipefail
-          terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null || terraform workspace new "${{ env.DEPLOY_ENV }}"
-
-      - name: Terraform Validate & Plan
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: |
-          set -euo pipefail
-          terraform fmt -check
-          terraform validate
-          terraform plan -out=tfplan -input=false -no-color
-
-      - name: Terraform Apply
-        if: steps.apply_mode.outputs.auto_apply == 'true'
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: |
-          set -euo pipefail
-          terraform apply -auto-approve -input=false tfplan
-
-      - name: Capture outputs
-        id: outputs_step
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: |
-          set -euo pipefail
-
-          echo "Checking terraform state..." >&2
           if ! terraform state list >/dev/null 2>&1; then
-            echo "No terraform state found, skipping output extraction" >&2
-            # Set empty outputs
-            echo "ecr_repository_url=" >> "$GITHUB_OUTPUT"
-            echo "ecs_cluster_name=" >> "$GITHUB_OUTPUT"
-            echo "ecs_service_name=" >> "$GITHUB_OUTPUT"
-            echo "ecs_task_family=" >> "$GITHUB_OUTPUT"
-            echo "celery_service_name=" >> "$GITHUB_OUTPUT"
-            echo "celery_task_family=" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "Error: No Terraform state found. Please run the infrastructure workflow first."
+            exit 1
           fi
+          eo(){ terraform output -raw "$1" 2>/dev/null || true; }
+          for k in ecs_cluster_name ecs_service_name ecs_task_family celery_service_name celery_task_family \
+                   ecr_repository_url django_secret_key_ssm_name database_url postgres_db postgres_user postgres_password postgres_host postgres_port \
+                   redis_url redis_reader_url redis_auth_token static_bucket_name media_bucket_name stripe_secret_key stripe_webhook_secret \
+                   ses_smtp_username ses_smtp_password
+          do
+            v="$(eo "$k")"; echo "$k=$v" >> "$GITHUB_OUTPUT"
+          done
 
-          extract_output() {
-            local name="$1"
-            echo "Attempting to extract terraform output: $name" >&2
-            if value=$(terraform output -raw "$name" 2>/dev/null); then
-              echo "Successfully extracted $name: $value" >&2
-              echo "$name=${value}" >> "$GITHUB_OUTPUT"
-            else
-              echo "Output $name not available, setting to empty" >&2
-              echo "$name=" >> "$GITHUB_OUTPUT"
-            fi
-          }
-
-          extract_output ecs_cluster_name
-          extract_output ecs_service_name
-          extract_output ecs_task_family
-          extract_output celery_service_name
-          extract_output celery_task_family
-          extract_output ecr_repository_url
-
-      - name: Show non-sensitive outputs
-        if: steps.apply_mode.outputs.auto_apply == 'true'
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: |
-          set -euo pipefail
-          echo "Terraform outputs:"
-          terraform output -no-color alb_dns_name 2>/dev/null || echo "alb_dns_name: not available"
-          terraform output -no-color alb_hosted_zone_id 2>/dev/null || echo "alb_hosted_zone_id: not available"
+          if app_env_json=$(terraform output -json application_environment 2>/dev/null); then
+            comp="$(echo "$app_env_json" | jq -c '.')"
+            echo "application_environment=$comp" >> "$GITHUB_OUTPUT"
+          else
+            echo "application_environment={}" >> "$GITHUB_OUTPUT"
+          fi
 
   build_and_push_image:
     name: Build & Push Image
     runs-on: ubuntu-latest
-    needs: [terraform_plan, terraform_apply]
-    if: needs.terraform_apply.outputs.apply_requested == 'true'
+    needs: [get_terraform_outputs]
     permissions: { id-token: write, contents: read }
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
 
-      - name: Configure AWS (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: ./.github/actions/aws-setup
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: gh-actions-${{ github.run_id }}
-          mask-aws-account-id: true
 
-      - name: Setup Docker Buildx
+      - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Get ECR repository URL
-        id: ecr_url
-        run: |
-          set -euo pipefail
-          echo "Constructing ECR repository URL..." >&2
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          REGION="${{ env.AWS_REGION }}"
-          DEPLOY_ENV="${{ env.DEPLOY_ENV }}"
-          # ECR repository name follows the pattern: vox-api-{environment}-api
-          ENV_PART=$(echo "$DEPLOY_ENV" | tr '_' '-')
-          ECR_REPO_URL="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/vox-api-${ENV_PART}-api"
-          echo "Using ECR repository URL: $ECR_REPO_URL" >&2
-          echo "ecr_repo_url=${ECR_REPO_URL}" >> "$GITHUB_OUTPUT"
-
-      - name: Log in to ECR
+      - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push
-        id: build_push
+      - name: Build & push
         env:
-          ECR_REPO_URL: ${{ steps.ecr_url.outputs.ecr_repo_url }}
+          ECR_REPO_URL: ${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [ -z "$ECR_REPO_URL" ]; then
-            echo "Error: ECR repository URL not available" >&2
-            exit 1
-          fi
           IMAGE="${ECR_REPO_URL}:${IMAGE_TAG}"
-          echo "Building and pushing image: $IMAGE" >&2
           docker build --pull --tag "$IMAGE" .
           docker push "$IMAGE"
-          # Note: Not outputting image URL to avoid sensitive data masking
 
   deploy_ecs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
-    needs: [terraform_plan, terraform_apply]
-    if: needs.terraform_apply.outputs.apply_requested == 'true'
+    needs: [get_terraform_outputs, build_and_push_image]
     environment: ${{ github.event.inputs.environment || 'production' }}
     permissions: { id-token: write, contents: read }
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
 
-      - name: Configure AWS (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: ./.github/actions/aws-setup
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: gh-actions-${{ github.run_id }}
-          mask-aws-account-id: true
 
       - name: Install jq
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq
+        run: sudo apt-get update -y && sudo apt-get install -y jq
 
-      - name: Get deployment image URL
-        id: deployment_image
-        env:
-          IMAGE_TAG: ${{ github.sha }}
+      # Email configuration: Uses SES SMTP credentials if available, otherwise falls back to user inputs
+      - name: Determine email configuration
+        id: email_config
         run: |
           set -euo pipefail
-          echo "Constructing ECR repository URL..." >&2
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          REGION="${{ env.AWS_REGION }}"
-          DEPLOY_ENV="${{ env.DEPLOY_ENV }}"
-          # ECR repository name follows the pattern: vox-api-{environment}-api
-          ENV_PART=$(echo "$DEPLOY_ENV" | tr '_' '-')
-          ECR_REPO_URL="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/vox-api-${ENV_PART}-api"
-          IMAGE="${ECR_REPO_URL}:${IMAGE_TAG}"
-          echo "Deployment image: $IMAGE" >&2
-          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          # Default to user-provided values
+          EMAIL_HOST="${{ github.event.inputs.email_host }}"
+          EMAIL_PORT="${{ github.event.inputs.email_port }}"
+          EMAIL_HOST_USER="${{ github.event.inputs.email_host_user }}"
+          EMAIL_HOST_PASSWORD="${{ github.event.inputs.email_host_password }}"
 
-      - name: Register task definitions
+          # Override with SES SMTP if available (check if not null/empty)
+          SES_USERNAME="${{ needs.get_terraform_outputs.outputs.ses_smtp_username }}"
+          SES_PASSWORD="${{ needs.get_terraform_outputs.outputs.ses_smtp_password }}"
+          if [ -n "$SES_USERNAME" ] && [ -n "$SES_PASSWORD" ] && [ "$SES_USERNAME" != "null" ] && [ "$SES_PASSWORD" != "null" ]; then
+            EMAIL_HOST="email-smtp.${{ env.AWS_REGION }}.amazonaws.com"
+            EMAIL_PORT="587"
+            EMAIL_HOST_USER="$SES_USERNAME"
+            EMAIL_HOST_PASSWORD="$SES_PASSWORD"
+            echo "Using SES SMTP credentials for email"
+          else
+            echo "Using user-provided email settings"
+          fi
+
+          echo "email_host=$EMAIL_HOST" >> "$GITHUB_OUTPUT"
+          echo "email_port=$EMAIL_PORT" >> "$GITHUB_OUTPUT"
+          echo "email_host_user=$EMAIL_HOST_USER" >> "$GITHUB_OUTPUT"
+          echo "email_host_password=$EMAIL_HOST_PASSWORD" >> "$GITHUB_OUTPUT"
+
+      - name: Register task definitions (API & Celery) using TF outputs
         id: register_td
+        env:
+          NEW_IMAGE: ${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}:${{ github.sha }}
+          ECS_TASK_FAMILY: ${{ needs.get_terraform_outputs.outputs.ecs_task_family }}
+          CELERY_TASK_FAMILY: ${{ needs.get_terraform_outputs.outputs.celery_task_family }}
+          BASE_ENV_JSON: ${{ needs.get_terraform_outputs.outputs.application_environment }}
+          DB_SSM_NAME: ${{ needs.get_terraform_outputs.outputs.database_url || needs.get_terraform_outputs.outputs.database_url_ssm_name || '' }}
+          DJANGO_SECRET_SSM: ${{ needs.get_terraform_outputs.outputs.django_secret_key_ssm_name || '' }}
+          REDIS_ENDPOINT: ${{ needs.get_terraform_outputs.outputs.redis_primary_endpoint || '' }}
+          REDIS_AUTH_SSM: ${{ needs.get_terraform_outputs.outputs.redis_auth_token || '' }}
+          STRIPE_SECRET_SSM: ${{ needs.get_terraform_outputs.outputs.stripe_secret_key || '' }}
+          STRIPE_WEBHOOK_SSM: ${{ needs.get_terraform_outputs.outputs.stripe_webhook_secret || '' }}
+          DJANGO_ENV: ${{ env.DEPLOY_ENV }}
+          FRONTEND_URL: ${{ github.event.inputs.frontend_url }}
+          DJANGO_ALLOWED_HOSTS: ${{ github.event.inputs.django_allowed_hosts }}
+          EMAIL_HOST: ${{ steps.email_config.outputs.email_host }}
+          EMAIL_PORT: ${{ steps.email_config.outputs.email_port }}
+          EMAIL_HOST_USER: ${{ steps.email_config.outputs.email_host_user }}
+          EMAIL_HOST_PASSWORD: ${{ steps.email_config.outputs.email_host_password }}
         run: |
           set -euo pipefail
 
-          # Function to register a new task definition revision
-          register_task_definition() {
-            local task_family="$1"
-            local service_name="$2"
-            local output_file="$3"
-            local new_image="$4"
-
-            if [ -z "$task_family" ]; then
-              echo "Error: $service_name task family output was empty" >&2
-              exit 1
-            fi
-            echo "Registering $service_name task definition with image: $new_image" >&2
-            if [ -z "$new_image" ]; then
-              echo "Error: NEW_IMAGE is empty for $service_name" >&2
-              exit 1
-            fi
-
-            aws ecs describe-task-definition \
-              --task-definition "$task_family" \
-              --query 'taskDefinition' > "$output_file.json"
-
-            jq --arg img "$new_image" \
-               '.containerDefinitions[0].image = $img |
-                del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
-               "$output_file.json" > "${output_file}-new.json"
-
-            NEW_TD_ARN=$(aws ecs register-task-definition --cli-input-json file://"${output_file}-new.json" --query 'taskDefinition.taskDefinitionArn' --output text)
-            echo "${service_name}_task_definition_arn=$NEW_TD_ARN" >> "$GITHUB_OUTPUT"
+          make_env_json() {
+            local base_json="${BASE_ENV_JSON:-{}}"
+            jq -n \
+              --argjson base "$base_json" \
+              --arg DJANGO_ENV           "${DJANGO_ENV}" \
+              --arg FRONTEND_URL         "${FRONTEND_URL}" \
+              --arg DJANGO_ALLOWED_HOSTS "${DJANGO_ALLOWED_HOSTS}" \
+              --arg EMAIL_HOST           "${EMAIL_HOST}" \
+              --arg EMAIL_PORT           "${EMAIL_PORT}" \
+              --arg EMAIL_HOST_USER      "${EMAIL_HOST_USER}" \
+              --arg EMAIL_HOST_PASSWORD  "${EMAIL_HOST_PASSWORD}" \
+              '$base
+                | .DJANGO_ENV = $DJANGO_ENV
+                | .FRONTEND_URL = (if $FRONTEND_URL != "" then $FRONTEND_URL else (.FRONTEND_URL // "") end)
+                | .DJANGO_ALLOWED_HOSTS = $DJANGO_ALLOWED_HOSTS
+                | .EMAIL_HOST = $EMAIL_HOST
+                | .EMAIL_PORT = $EMAIL_PORT
+                | .EMAIL_HOST_USER = $EMAIL_HOST_USER
+                | .EMAIL_HOST_PASSWORD = $EMAIL_HOST_PASSWORD
+                | .EMAIL_USE_TLS = "1"
+                | to_entries | map({name:.key, value:.value})'
           }
 
-          NEW_IMAGE="${{ steps.deployment_image.outputs.image }}"
-          register_task_definition "${{ needs.terraform_apply.outputs.ecs_task_family }}" "api" "td-api" "$NEW_IMAGE"
-          register_task_definition "${{ needs.terraform_apply.outputs.celery_task_family }}" "celery" "td-celery" "$NEW_IMAGE"
+          register_td() {
+            local family="$1" name="$2" file="$3"
+            [ -n "$family" ] || { echo "Missing task family for $name" >&2; exit 1; }
+            aws ecs describe-task-definition --task-definition "$family" --query 'taskDefinition' > "$file.json"
+            env_json="$(make_env_json)"
 
-      - name: Update ECS API service
+            # Build secrets array for containerDefinition - use SSM/Secrets ARNs or names
+            secrets_json="[]"
+            # Helper to append a secret mapping if both name and valueFrom are present
+            add_secret() {
+              local name="$1" value_from="$2"
+              if [ -n "$name" ] && [ -n "$value_from" ] && [ "$value_from" != "null" ]; then
+                secrets_json=$(jq -c --arg name "$name" --arg valueFrom "$value_from" '. + [{name:$name, valueFrom:$valueFrom}]' <<<"$secrets_json")
+              fi
+            }
+
+            # Determine valueFrom references. Prefer full ARN if TF provides it, otherwise assume SSM parameter name and build SSM parameter ARN
+            # DB
+            if [ -n "${DB_SSM_NAME:-}" ] && [ "${DB_SSM_NAME:-}" != "" ] && [ "${DB_SSM_NAME:-}" != "null" ]; then
+              DB_VALFROM="$DB_SSM_NAME"
+              # Normalize: ensure parameter name starts with '/'
+              if [[ "$DB_VALFROM" != /* ]]; then
+                DB_VALFROM="/${DB_VALFROM}"
+              fi
+              # If it's not already an ARN, build the ARN using the resolved AWS account id and region
+              if [[ "$DB_VALFROM" != arn:* ]]; then
+                DB_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${DB_VALFROM}"
+              fi
+              add_secret "DATABASE_URL" "$DB_VALFROM"
+            fi
+
+            # Django secret
+            if [ -n "${DJANGO_SECRET_SSM:-}" ] && [ "${DJANGO_SECRET_SSM:-}" != "" ] && [ "${DJANGO_SECRET_SSM:-}" != "null" ]; then
+              DS_VALFROM="$DJANGO_SECRET_SSM"
+              if [[ "$DS_VALFROM" != /* ]]; then
+                DS_VALFROM="/${DS_VALFROM}"
+              fi
+              if [[ "$DS_VALFROM" != arn:* ]]; then
+                DS_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${DS_VALFROM}"
+              fi
+              add_secret "DJANGO_SECRET_KEY" "$DS_VALFROM"
+            fi
+
+            # Redis auth
+            if [ -n "${REDIS_AUTH_SSM:-}" ] && [ "${REDIS_AUTH_SSM:-}" != "" ] && [ "${REDIS_AUTH_SSM:-}" != "null" ]; then
+              R_VALFROM="$REDIS_AUTH_SSM"
+              if [[ "$R_VALFROM" != /* ]]; then
+                R_VALFROM="/${R_VALFROM}"
+              fi
+              if [[ "$R_VALFROM" != arn:* ]]; then
+                R_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${R_VALFROM}"
+              fi
+              add_secret "REDIS_AUTH_TOKEN" "$R_VALFROM"
+              # If we also have endpoint, set REDIS_URL as a non-secret derived value referencing the endpoint and secret via task-side templating
+              if [ -n "${REDIS_ENDPOINT:-}" ] && [ "${REDIS_ENDPOINT:-}" != "" ] && [ "${REDIS_ENDPOINT:-}" != "null" ]; then
+                # Keep REDIS_ENDPOINT as environment; the app can construct URL using REDIS_AUTH_TOKEN
+                env_json=$(jq -c --arg k "REDIS_ENDPOINT" --arg v "${REDIS_ENDPOINT}" '. + [{name:$k, value:$v}]' <<<"$env_json")
+              fi
+            fi
+
+            # Stripe secrets
+            if [ -n "${STRIPE_SECRET_SSM:-}" ] && [ "${STRIPE_SECRET_SSM:-}" != "" ] && [ "${STRIPE_SECRET_SSM:-}" != "null" ]; then
+              S_STR_VALFROM="$STRIPE_SECRET_SSM"
+              if [[ "$S_STR_VALFROM" != /* ]]; then
+                S_STR_VALFROM="/${S_STR_VALFROM}"
+              fi
+              if [[ "$S_STR_VALFROM" != arn:* ]]; then
+                S_STR_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${S_STR_VALFROM}"
+              fi
+              add_secret "STRIPE_SECRET_KEY" "$S_STR_VALFROM"
+            fi
+            if [ -n "${STRIPE_WEBHOOK_SSM:-}" ] && [ "${STRIPE_WEBHOOK_SSM:-}" != "" ] && [ "${STRIPE_WEBHOOK_SSM:-}" != "null" ]; then
+              S_WEB_VALFROM="$STRIPE_WEBHOOK_SSM"
+              if [[ "$S_WEB_VALFROM" != /* ]]; then
+                S_WEB_VALFROM="/${S_WEB_VALFROM}"
+              fi
+              if [[ "$S_WEB_VALFROM" != arn:* ]]; then
+                S_WEB_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${S_WEB_VALFROM}"
+              fi
+              add_secret "STRIPE_WEBHOOK_SECRET" "$S_WEB_VALFROM"
+            fi
+
+            # Register task definition: inject image, environment and secrets
+            jq --arg img "$NEW_IMAGE" --argjson env "$env_json" --argjson secrets "$secrets_json" \
+              '.containerDefinitions[0].image = $img
+               | .containerDefinitions[0].environment = $env
+               | .containerDefinitions[0].secrets = $secrets
+               | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
+              "$file.json" > "${file}-new.json"
+            aws ecs register-task-definition \
+              --cli-input-json file://"${file}-new.json" \
+              --query 'taskDefinition.taskDefinitionArn' --output text
+          }
+
+          API_TD_ARN=$(register_td "${ECS_TASK_FAMILY}"    "api"    "td-api")
+          CEL_TD_ARN=$(register_td "${CELERY_TASK_FAMILY}" "celery" "td-celery")
+          echo "api_td_arn=$API_TD_ARN"    >> "$GITHUB_OUTPUT"
+          echo "celery_td_arn=$CEL_TD_ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Update ECS services
         env:
-          ECS_CLUSTER: ${{ needs.terraform_apply.outputs.ecs_cluster_name }}
-          ECS_SERVICE: ${{ needs.terraform_apply.outputs.ecs_service_name }}
-          TASK_DEF_ARN: ${{ steps.register_td.outputs.api_task_definition_arn }}
+          ECS_CLUSTER: ${{ needs.get_terraform_outputs.outputs.ecs_cluster_name }}
+          API_SERVICE: ${{ needs.get_terraform_outputs.outputs.ecs_service_name }}
+          CELERY_SERVICE: ${{ needs.get_terraform_outputs.outputs.celery_service_name }}
+          API_TD_ARN: ${{ steps.register_td.outputs.api_td_arn }}
+          CELERY_TD_ARN: ${{ steps.register_td.outputs.celery_td_arn }}
         run: |
           set -euo pipefail
-          if [ -z "$ECS_CLUSTER" ] || [ -z "$ECS_SERVICE" ]; then
-            echo "Error: ECS cluster/service outputs were empty" >&2
-            exit 1
-          fi
+          # API
+          [ -n "$ECS_CLUSTER" ] && [ -n "$API_SERVICE" ] && [ -n "$API_TD_ARN" ]
           aws ecs update-service \
-            --cluster "$ECS_CLUSTER" \
-            --service "$ECS_SERVICE" \
-            --task-definition "$TASK_DEF_ARN" \
-            --force-new-deployment \
-            --region "${{ env.AWS_REGION }}" \
-            --output text \
-            --query 'service.serviceArn' >/dev/null
-
-      - name: Update ECS Celery service
-        env:
-          ECS_CLUSTER: ${{ needs.terraform_apply.outputs.ecs_cluster_name }}
-          CELERY_SERVICE: ${{ needs.terraform_apply.outputs.celery_service_name }}
-          CELERY_TASK_DEF_ARN: ${{ steps.register_td.outputs.celery_task_definition_arn }}
-        run: |
-          set -euo pipefail
-          if [ -z "$ECS_CLUSTER" ] || [ -z "$CELERY_SERVICE" ]; then
-            echo "Error: ECS cluster/Celery service outputs were empty" >&2
-            exit 1
+            --cluster "$ECS_CLUSTER" --service "$API_SERVICE" \
+            --task-definition "$API_TD_ARN" --desired-count 2 --force-new-deployment \
+            --region "${{ env.AWS_REGION }}" --query 'service.serviceArn' --output text >/dev/null
+          # Celery (optional)
+          if [ -n "$CELERY_SERVICE" ] && [ -n "$CELERY_TD_ARN" ]; then
+            aws ecs update-service \
+              --cluster "$ECS_CLUSTER" --service "$CELERY_SERVICE" \
+              --task-definition "$CELERY_TD_ARN" --desired-count 1 --force-new-deployment \
+              --region "${{ env.AWS_REGION }}" --query 'service.serviceArn' --output text >/dev/null
           fi
-          aws ecs update-service \
-            --cluster "$ECS_CLUSTER" \
-            --service "$CELERY_SERVICE" \
-            --task-definition "$CELERY_TASK_DEF_ARN" \
-            --force-new-deployment \
-            --region "${{ env.AWS_REGION }}" \
-            --output text \
-            --query 'service.serviceArn' >/dev/null

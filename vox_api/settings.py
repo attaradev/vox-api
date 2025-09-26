@@ -1,13 +1,142 @@
-# Redis configuration
+import logging
 import os
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlunparse
 
-from vox_api.aws_secrets import get_aws_secret
 
-REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
-REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
+def env(key: str, default=None):
+    """Read an environment variable with a fallback."""
+
+    return os.environ.get(key, default)
+
+
+def env_bool(key: str, default: bool) -> bool:
+    """Interpret an environment variable as a boolean flag."""
+
+    value = os.environ.get(key)
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(key: str, default: int) -> int:
+    """Return an integer environment variable, falling back on errors."""
+
+    value = os.environ.get(key)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def env_float(key: str, default: float) -> float:
+    """Return a float environment variable, falling back on errors."""
+
+    value = os.environ.get(key)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+DJANGO_ENV = env("DJANGO_ENV", "development")
+IS_PRODUCTION = DJANGO_ENV == "production"
+DEBUG = DJANGO_ENV == "development"
+
+# Redis configuration
+
+# Handle Redis URL - either direct URL or host/port components
+REDIS_URL = env("REDIS_URL")
+if REDIS_URL:
+    # Parse the provided REDIS_URL
+    parsed = urlparse(REDIS_URL)
+    REDIS_HOST = parsed.hostname or "localhost"
+    REDIS_PORT = parsed.port or 6379
+else:
+    # Fallback to individual host/port env vars
+    REDIS_HOST = env("REDIS_HOST", "localhost")
+    REDIS_PORT = env_int("REDIS_PORT", 6379)
+    REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
+
+
+def _redis_url_with_db(url: str, db_alias: str) -> str:
+    """Return the provided Redis URL pointed at the desired logical database."""
+
+    parsed = urlparse(url)
+    if not parsed.scheme.startswith("redis"):
+        return url
+    return urlunparse(parsed._replace(path=f"/{db_alias}"))
+
+
+CACHE_URL = env("CACHE_URL")
+if not CACHE_URL and REDIS_URL:
+    cache_db = env("CACHE_REDIS_DB", "1")
+    CACHE_URL = _redis_url_with_db(REDIS_URL, cache_db)
+
+try:  # Optional dependency for redis-backed caches and Celery
+    import redis  # noqa: F401
+
+    _redis_driver_present = True
+except ImportError:
+    _redis_driver_present = False
+
+CACHE_LOGGER = logging.getLogger("vox_api.settings.cache")
+
+
+def _redis_cache_available(location: str) -> bool:
+    if not _redis_driver_present or not location:
+        return False
+    if not location.startswith("redis://"):
+        return False
+    try:
+        client = redis.Redis.from_url(  # type: ignore[attr-defined]
+            location,
+            socket_connect_timeout=env_float("CACHE_REDIS_CONNECT_TIMEOUT", 0.25),
+        )
+        client.ping()
+        client.close()
+        return True
+    except Exception as exc:  # pragma: no cover - defensive guard
+        CACHE_LOGGER.warning(
+            "Redis cache unavailable at %s; falling back to in-memory cache. (%s)",
+            location,
+            exc,
+        )
+        return False
+
+
+CACHE_DEFAULT_TIMEOUT = env_int("CACHE_DEFAULT_TIMEOUT", 300)
+
+if _redis_cache_available(CACHE_URL or ""):
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": CACHE_URL,
+            "TIMEOUT": CACHE_DEFAULT_TIMEOUT,
+            "OPTIONS": {
+                "retry_on_timeout": True,
+            },
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "vox-api-local",
+            "TIMEOUT": CACHE_DEFAULT_TIMEOUT,
+        }
+    }
+    if CACHE_URL and CACHE_URL.startswith("redis://") and not _redis_driver_present:
+        CACHE_LOGGER.warning(
+            "redis-py is not installed; falling back to in-memory caching backend."
+        )
+
+DEFAULT_CACHE_TTL = CACHE_DEFAULT_TIMEOUT
+POLL_CACHE_TIMEOUT = env_int("POLL_CACHE_TIMEOUT", DEFAULT_CACHE_TTL)
 
 # Logging configuration
 
@@ -41,17 +170,15 @@ LOGGING = {
 }
 
 # Email settings
-EMAIL_BACKEND = os.environ.get(
-    "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
-)
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", 587))
-EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "1") == "1"
-EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_BACKEND = env("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = env("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = env_int("EMAIL_PORT", 587)
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", "")
 
 # Frontend URL for password reset links
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://your-frontend")
+FRONTEND_URL = env("FRONTEND_URL", "https://your-frontend")
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -80,19 +207,6 @@ REST_FRAMEWORK = {
     # Custom exception handler for unified error responses
     "EXCEPTION_HANDLER": "vox_api.utils.custom_exception_handler",
 }
-"""
-Django settings for vox_api project.
-
-Generated by 'django-admin startproject' using Django 4.2.3.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/4.2/topics/settings/
-
-For the full list of settings and their values, see
-https://docs.djangoproject.com/en/4.2/ref/settings/
-"""
-
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -101,7 +215,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = env("DATABASE_URL")
 
 
 def _database_config_from_url(url: str) -> dict:
@@ -128,52 +242,31 @@ def _database_config_from_url(url: str) -> dict:
     return config
 
 
-if os.environ.get("DJANGO_ENV") == "production":
-    # Load secrets from AWS Secrets Manager
-    secret_config = get_aws_secret(
-        os.environ.get("DJANGO_AWS_SECRET_NAME", "vox-api-config")
-    )
-    SECRET_KEY = secret_config.get("DJANGO_SECRET_KEY")
-    database_url = secret_config.get("DATABASE_URL")
-    POSTGRES_DB = secret_config.get("POSTGRES_DB")
-    POSTGRES_USER = secret_config.get("POSTGRES_USER")
-    POSTGRES_PASSWORD = secret_config.get("POSTGRES_PASSWORD")
-    POSTGRES_HOST = secret_config.get("POSTGRES_HOST", "db")
-    POSTGRES_PORT = secret_config.get("POSTGRES_PORT", "5432")
-    AWS_STORAGE_BUCKET_NAME = secret_config.get("AWS_STORAGE_BUCKET_NAME", "")
-    AWS_ACCESS_KEY_ID = secret_config.get("AWS_ACCESS_KEY_ID", "")
-    AWS_SECRET_ACCESS_KEY = secret_config.get("AWS_SECRET_ACCESS_KEY", "")
-    AWS_S3_REGION_NAME = secret_config.get("AWS_S3_REGION_NAME", "us-east-1")
-    STRIPE_SECRET_KEY = secret_config.get("STRIPE_SECRET_KEY") or os.environ.get(
-        "STRIPE_SECRET_KEY",
-        "",
-    )
-    STRIPE_WEBHOOK_SECRET = secret_config.get(
-        "STRIPE_WEBHOOK_SECRET"
-    ) or os.environ.get(
-        "STRIPE_WEBHOOK_SECRET",
-        "",
-    )
-    if database_url:
-        DATABASE_URL = database_url
-else:
-    SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-change-me")
+POSTGRES_DB = env("POSTGRES_DB")
+POSTGRES_USER = env("POSTGRES_USER")
+POSTGRES_PASSWORD = env("POSTGRES_PASSWORD")
+POSTGRES_HOST = env("POSTGRES_HOST", "db")
+POSTGRES_PORT = env("POSTGRES_PORT", "5432")
 
-    STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "sk_test_your_default_key")
-    STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME", "")
+AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY", "")
+AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", "us-east-1")
 
-# Set DEBUG based on DJANGO_ENV
-DJANGO_ENV = os.environ.get("DJANGO_ENV", "development")
-DEBUG = DJANGO_ENV == "development"
+SECRET_KEY = env(
+    "DJANGO_SECRET_KEY", "sample-secret-key-for-dev-only" if not IS_PRODUCTION else None
+)
 
-use_redis_pref = os.environ.get("USE_REDIS_FOR_CELERY")
-if use_redis_pref is None:
-    USE_REDIS_FOR_CELERY = not DEBUG
-else:
-    USE_REDIS_FOR_CELERY = use_redis_pref == "1"
+STRIPE_SECRET_KEY = env(
+    "STRIPE_SECRET_KEY",
+    "" if IS_PRODUCTION else "sk_test_your_default_key",
+)
+STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", "")
 
-celery_broker = os.environ.get("CELERY_BROKER_URL")
-celery_backend = os.environ.get("CELERY_RESULT_BACKEND")
+USE_REDIS_FOR_CELERY = env_bool("USE_REDIS_FOR_CELERY", not DEBUG)
+
+celery_broker = env("CELERY_BROKER_URL")
+celery_backend = env("CELERY_RESULT_BACKEND")
 
 if USE_REDIS_FOR_CELERY and not celery_broker:
     celery_broker = REDIS_URL
@@ -189,35 +282,46 @@ elif CELERY_BROKER_URL.startswith("redis://"):
 else:
     CELERY_RESULT_BACKEND = "cache+memory://"
 
-celery_eager_env = os.environ.get("CELERY_TASK_ALWAYS_EAGER")
-if celery_eager_env is None:
-    CELERY_TASK_ALWAYS_EAGER = DEBUG
-else:
-    CELERY_TASK_ALWAYS_EAGER = celery_eager_env == "1"
+CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", DEBUG)
 
 CELERY_TASK_EAGER_PROPAGATES = True
 
-ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "0.0.0.0,localhost").split(",")
+# Allowed hosts default to local development values. When DEBUG is enabled we
+# widen the list to include common testing hosts (127.0.0.1, testserver) so dev
+# tooling like Swagger UI and Django's test client don't trip DisallowedHost.
+_raw_allowed_hosts = env("DJANGO_ALLOWED_HOSTS", "0.0.0.0,localhost").split(",")
+_clean_allowed_hosts = [host.strip() for host in _raw_allowed_hosts if host.strip()]
+if DEBUG:
+    _clean_allowed_hosts.extend(["127.0.0.1", "testserver"])
+ALLOWED_HOSTS = list(dict.fromkeys(_clean_allowed_hosts))
 
 
 # Application definition
 
-INSTALLED_APPS = [
+DJANGO_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+]
+
+THIRD_PARTY_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "drf_spectacular",
+]
+
+LOCAL_APPS = [
     "accounts",
     "auth",
     "polls",
     "billing",
     "core",
 ]
+
+INSTALLED_APPS = list(dict.fromkeys([*DJANGO_APPS, *THIRD_PARTY_APPS, *LOCAL_APPS]))
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -256,7 +360,7 @@ WSGI_APPLICATION = "vox_api.wsgi.application"
 
 if DATABASE_URL:
     DATABASES = {"default": _database_config_from_url(DATABASE_URL)}
-elif os.environ.get("DJANGO_ENV") == "production":
+elif IS_PRODUCTION:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
@@ -267,15 +371,15 @@ elif os.environ.get("DJANGO_ENV") == "production":
             "PORT": POSTGRES_PORT,
         }
     }
-elif os.environ.get("POSTGRES_DB"):
+elif POSTGRES_DB:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ.get("POSTGRES_DB"),
-            "USER": os.environ.get("POSTGRES_USER"),
-            "PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
-            "HOST": os.environ.get("POSTGRES_HOST", "db"),
-            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+            "NAME": POSTGRES_DB,
+            "USER": POSTGRES_USER,
+            "PASSWORD": POSTGRES_PASSWORD,
+            "HOST": POSTGRES_HOST,
+            "PORT": POSTGRES_PORT,
         }
     }
 else:
@@ -322,19 +426,12 @@ USE_TZ = True
 
 
 # Static files (CSS, JavaScript, Images)
-STATIC_URL = "/static/"
+STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Media files
-MEDIA_URL = "/media/"
+MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
-
-if os.environ.get("DJANGO_ENV") == "production":
-    AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
-    STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/static/"
-    MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/media/"
-    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-    STATICFILES_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
 
 # Security best practices
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

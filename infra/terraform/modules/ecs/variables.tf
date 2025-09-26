@@ -1,3 +1,38 @@
+variable "cpu" {
+  description = "CPU units for ECS task definition"
+  type        = string
+}
+variable "execution_role_arn" {
+  description = "IAM execution role ARN for ECS task definition"
+  type        = string
+  default     = ""
+}
+variable "aws_region" {
+  description = "AWS region for log configuration"
+  type        = string
+}
+
+variable "family" {
+  description = "Family name for ECS task definition"
+  type        = string
+}
+
+variable "ecs_log_group_name" {
+  description = "Name of the CloudWatch log group for ECS service"
+  type        = string
+}
+
+variable "ecs_cpu_high_alarm_name" {
+  description = "Name of the ECS high CPU alarm"
+  type        = string
+}
+
+variable "ecs_unhealthy_alarm_name" {
+  description = "Name of the ECS unhealthy tasks alarm"
+  type        = string
+}
+
+
 variable "name_prefix" {
   description = "Base name used for ECS resources"
   type        = string
@@ -51,11 +86,7 @@ variable "desired_count" {
   default     = 2
 }
 
-variable "cpu" {
-  description = "CPU units for the Fargate task"
-  type        = number
-  default     = 512
-}
+// ...existing code...
 
 variable "memory" {
   description = "Memory (MB) for the Fargate task"
@@ -79,15 +110,6 @@ variable "environment" {
   description = "Environment variables injected into the container"
   type        = map(string)
   default     = {}
-}
-
-variable "secrets" {
-  description = "Secrets provided to the container"
-  type = list(object({
-    name       = string
-    value_from = string
-  }))
-  default = []
 }
 
 variable "certificate_arn" {
@@ -124,12 +146,6 @@ variable "task_role_policy_arns" {
   description = "Map of IAM policies to attach to the task role (key is descriptive name)"
   type        = map(string)
   default     = {}
-}
-
-variable "secrets_arns" {
-  description = "List of Secrets Manager ARNs that the ECS execution role needs access to"
-  type        = list(string)
-  default     = []
 }
 
 variable "tags" {

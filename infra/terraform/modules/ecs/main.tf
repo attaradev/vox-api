@@ -1,7 +1,8 @@
+
+
 locals {
   container_name = "${var.name_prefix}-api"
   environment    = [for k, v in var.environment : { name = k, value = v }]
-  secrets        = [for secret in var.secrets : { name = secret.name, valueFrom = secret.value_from }]
 }
 
 data "aws_elb_service_account" "this" {}
@@ -54,22 +55,9 @@ resource "aws_iam_role_policy_attachment" "execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-resource "aws_iam_role_policy" "execution_secrets" {
-  name = "${var.name_prefix}-ecs-execution-secrets"
-  role = aws_iam_role.execution.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue"
-        ]
-        Resource = var.secrets_arns
-      }
-    ]
-  })
+resource "aws_iam_role_policy_attachment" "execution_ssm" {
+  role       = aws_iam_role.execution.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess"
 }
 
 resource "aws_iam_role" "task" {
@@ -184,13 +172,30 @@ resource "aws_lb_listener" "http" {
   protocol          = "HTTP"
 
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.this.arn
+    type = var.certificate_arn != "" ? "redirect" : "forward"
+
+    dynamic "redirect" {
+      for_each = var.certificate_arn != "" ? [1] : []
+      content {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
+    }
+
+    dynamic "forward" {
+      for_each = var.certificate_arn != "" ? [] : [1]
+      content {
+        target_group {
+          arn = aws_lb_target_group.this.arn
+        }
+      }
+    }
   }
 }
 
 resource "aws_lb_listener" "https" {
-  count = length(var.certificate_arn) > 0 ? 1 : 0
+  count = var.certificate_arn != "" ? 1 : 0
 
   load_balancer_arn = aws_lb.this.arn
   port              = 443
@@ -239,7 +244,6 @@ resource "aws_ecs_task_definition" "this" {
         }
       }
       environment = local.environment
-      secrets     = local.secrets
       healthCheck = {
         command  = ["CMD-SHELL", "curl -f http://localhost:${var.container_port}${var.health_check_path} || exit 1"]
         interval = 30

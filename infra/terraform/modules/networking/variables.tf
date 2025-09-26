@@ -1,4 +1,4 @@
-variable "name" {
+variable "name_prefix" {
   description = "Prefix used for naming network resources"
   type        = string
 }
@@ -61,6 +61,12 @@ variable "flow_logs_retention_in_days" {
   default     = 30
 }
 
+variable "flow_logs_log_group_name" {
+  description = "Optional existing CloudWatch log group name to use for VPC flow logs"
+  type        = string
+  default     = ""
+}
+
 variable "create_vpc_endpoints" {
   description = "Whether to create common VPC interface and gateway endpoints"
   type        = bool
@@ -71,4 +77,22 @@ variable "tags" {
   description = "Tags to apply to created resources"
   type        = map(string)
   default     = {}
+}
+
+variable "alb_allowed_cidrs" {
+  description = "List of CIDR blocks allowed to access the ALB"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "enable_https_listener" {
+  description = "Whether to enable HTTPS listener on ALB"
+  type        = bool
+  default     = false
+}
+
+variable "container_port" {
+  description = "Port for ECS containers"
+  type        = number
+  default     = 80
 }

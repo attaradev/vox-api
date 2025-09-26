@@ -1,5 +1,6 @@
 """ViewSet definitions for poll API endpoints."""
 
+from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
@@ -9,6 +10,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
+from polls import cache_utils as poll_cache
 from polls.models import Choice, Poll, Question, Vote
 from polls.permissions import MANAGER_ROLES, IsAccountManagerOrReadOnly
 from polls.serializers import (
@@ -50,6 +52,24 @@ class PollViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status=status_filter)
         return queryset
 
+    def list(self, request, *args, **kwargs):
+        """Return a cached poll list when available."""
+
+        full_path = request.get_full_path()
+        cached_payload = poll_cache.get_cached_list_response(request.user, full_path)
+        if cached_payload is not None:
+            return Response(cached_payload)
+
+        response = super().list(request, *args, **kwargs)
+        if response.status_code == status.HTTP_200_OK and response.data is not None:
+            poll_cache.cache_list_response(
+                request.user,
+                full_path,
+                response.data,
+                timeout=getattr(settings, "POLL_CACHE_TIMEOUT", None),
+            )
+        return response
+
     def perform_create(self, serializer):
         """Create a poll instance atomically."""
         account = serializer.validated_data.get("account")
@@ -67,6 +87,10 @@ class PollViewSet(viewsets.ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         poll = self.get_object()
+        _, cached_payload = poll_cache.get_cached_poll_detail(poll.pk, request.user)
+        if cached_payload is not None:
+            return Response(cached_payload)
+
         questions_qs = poll.questions.prefetch_related("choices")
         if questions_qs.count() > 1 and self.paginator is not None:
             page = self.paginate_queryset(questions_qs)
@@ -74,10 +98,23 @@ class PollViewSet(viewsets.ModelViewSet):
             poll_data = self.get_serializer(poll).data
             response = self.get_paginated_response(serializer.data)
             response.data["poll"] = poll_data
+            poll_cache.cache_poll_detail(
+                poll.pk,
+                request.user,
+                response.data,
+                timeout=getattr(settings, "POLL_CACHE_TIMEOUT", None),
+            )
             return response
 
         serializer = self.get_serializer(poll)
-        return Response(serializer.data)
+        payload = serializer.data
+        poll_cache.cache_poll_detail(
+            poll.pk,
+            request.user,
+            payload,
+            timeout=getattr(settings, "POLL_CACHE_TIMEOUT", None),
+        )
+        return Response(payload)
 
     @action(detail=True, methods=["patch"], url_path="status")
     def update_status(self, request, pk=None):
@@ -127,6 +164,7 @@ class PollViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             for index, question_id in enumerate(order):
                 Question.objects.filter(poll=poll, id=question_id).update(order=index)
+        transaction.on_commit(lambda: poll_cache.invalidate_poll_cache(poll.pk))
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(
@@ -196,6 +234,7 @@ class PollViewSet(viewsets.ModelViewSet):
                 Choice.objects.filter(question=question, id=choice_id).update(
                     order=index
                 )
+        transaction.on_commit(lambda: poll_cache.invalidate_poll_cache(poll.pk))
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(
