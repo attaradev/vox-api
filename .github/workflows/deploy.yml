@@ -79,6 +79,8 @@ jobs:
       ecs_cluster_name: ${{ steps.outputs_step.outputs.ecs_cluster_name || '' }}
       ecs_service_name: ${{ steps.outputs_step.outputs.ecs_service_name || '' }}
       ecs_task_family: ${{ steps.outputs_step.outputs.ecs_task_family || '' }}
+      celery_service_name: ${{ steps.outputs_step.outputs.celery_service_name || '' }}
+      celery_task_family: ${{ steps.outputs_step.outputs.celery_task_family || '' }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
@@ -199,6 +201,8 @@ jobs:
           extract_output ecs_cluster_name
           extract_output ecs_service_name
           extract_output ecs_task_family
+          extract_output celery_service_name
+          extract_output celery_task_family
 
       - name: Show non-sensitive outputs
         if: steps.apply_mode.outputs.auto_apply == 'true'
@@ -275,8 +279,8 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y jq
 
-      - name: Register new task definition revision
-        id: register_td
+      - name: Register new task definition revision (API)
+        id: register_td_api
         env:
           ECS_TASK_FAMILY: ${{ needs.terraform_infra.outputs.ecs_task_family }}
           NEW_IMAGE: ${{ needs.build_and_push_image.outputs.image }}
@@ -288,21 +292,44 @@ jobs:
           fi
           aws ecs describe-task-definition \
             --task-definition "$ECS_TASK_FAMILY" \
-            --query 'taskDefinition' > td.json
+            --query 'taskDefinition' > td-api.json
 
           jq --arg img "$NEW_IMAGE" \
              '.containerDefinitions[0].image = $img |
               del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
-             td.json > td-new.json
+             td-api.json > td-api-new.json
 
-          NEW_TD_ARN=$(aws ecs register-task-definition --cli-input-json file://td-new.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          NEW_TD_ARN=$(aws ecs register-task-definition --cli-input-json file://td-api-new.json --query 'taskDefinition.taskDefinitionArn' --output text)
           echo "task_definition_arn=$NEW_TD_ARN" >> "$GITHUB_OUTPUT"
 
-      - name: Update ECS service
+      - name: Register new task definition revision (Celery)
+        id: register_td_celery
+        env:
+          CELERY_TASK_FAMILY: ${{ needs.terraform_infra.outputs.celery_task_family }}
+          NEW_IMAGE: ${{ needs.build_and_push_image.outputs.image }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CELERY_TASK_FAMILY" ]; then
+            echo "Error: Celery task family output was empty" >&2
+            exit 1
+          fi
+          aws ecs describe-task-definition \
+            --task-definition "$CELERY_TASK_FAMILY" \
+            --query 'taskDefinition' > td-celery.json
+
+          jq --arg img "$NEW_IMAGE" \
+             '.containerDefinitions[0].image = $img |
+              del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+             td-celery.json > td-celery-new.json
+
+          NEW_TD_ARN=$(aws ecs register-task-definition --cli-input-json file://td-celery-new.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "task_definition_arn=$NEW_TD_ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Update ECS API service
         env:
           ECS_CLUSTER: ${{ needs.terraform_infra.outputs.ecs_cluster_name }}
           ECS_SERVICE: ${{ needs.terraform_infra.outputs.ecs_service_name }}
-          TASK_DEF_ARN: ${{ steps.register_td.outputs.task_definition_arn }}
+          TASK_DEF_ARN: ${{ steps.register_td_api.outputs.task_definition_arn }}
         run: |
           set -euo pipefail
           if [ -z "$ECS_CLUSTER" ] || [ -z "$ECS_SERVICE" ]; then
@@ -313,6 +340,26 @@ jobs:
             --cluster "$ECS_CLUSTER" \
             --service "$ECS_SERVICE" \
             --task-definition "$TASK_DEF_ARN" \
+            --force-new-deployment \
+            --region "${{ env.AWS_REGION }}" \
+            --output text \
+            --query 'service.serviceArn' >/dev/null
+
+      - name: Update ECS Celery service
+        env:
+          ECS_CLUSTER: ${{ needs.terraform_infra.outputs.ecs_cluster_name }}
+          CELERY_SERVICE: ${{ needs.terraform_infra.outputs.celery_service_name }}
+          CELERY_TASK_DEF_ARN: ${{ steps.register_td_celery.outputs.task_definition_arn }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ECS_CLUSTER" ] || [ -z "$CELERY_SERVICE" ]; then
+            echo "Error: ECS cluster/Celery service outputs were empty" >&2
+            exit 1
+          fi
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$CELERY_SERVICE" \
+            --task-definition "$CELERY_TASK_DEF_ARN" \
             --force-new-deployment \
             --region "${{ env.AWS_REGION }}" \
             --output text \

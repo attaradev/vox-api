@@ -72,6 +72,50 @@ locals {
   private_data_subnets = length(var.private_data_subnet_cidrs) > 0 ? var.private_data_subnet_cidrs : local.computed_private_data_subnets
 }
 
+# -----------------------------------------------------------------------------
+# DATA SOURCES
+# -----------------------------------------------------------------------------
+
+data "aws_iam_role" "ecs_task_execution" {
+  count = var.create_iam_role ? 0 : 1
+  name  = "${local.name_prefix}-ecs-execution"
+}
+
+data "aws_secretsmanager_secret" "django_secret_key" {
+  count = var.create_shared_resources ? 0 : 1
+  name  = "${local.name_prefix}-django-settings"
+}
+
+data "aws_s3_bucket" "logs" {
+  count  = var.create_shared_resources ? 0 : 1
+  bucket = "${local.name_prefix}-logs"
+}
+
+data "aws_ecr_repository" "app" {
+  count = var.create_shared_resources ? 0 : 1
+  name  = "${local.name_prefix}-api"
+}
+
+data "aws_lb_target_group" "app" {
+  count = var.create_alb ? 0 : 1
+  name  = "${local.name_prefix}-api"
+}
+
+data "aws_cloudwatch_log_group" "ecs" {
+  count = var.create_cloudwatch_log_groups ? 0 : 1
+  name  = "/aws/ecs/${local.name_prefix}-service"
+}
+
+data "aws_cloudwatch_log_group" "celery" {
+  count = var.create_cloudwatch_log_groups ? 0 : 1
+  name  = "/aws/ecs/${local.name_prefix}-celery"
+}
+
+data "aws_s3_bucket" "static" {
+  count  = var.create_shared_resources ? 0 : 1
+  bucket = "${local.name_prefix}-static"
+}
+
 module "network" {
   source = "./modules/network"
 
@@ -89,8 +133,12 @@ module "network" {
 # SECURITY GROUPS
 # -----------------------------------------------------------------------------
 
+resource "random_id" "alb_sg_suffix" {
+  byte_length = 4
+}
+
 resource "aws_security_group" "alb" {
-  name        = "${local.name_prefix}-alb"
+  name        = "${local.name_prefix}-alb-${random_id.alb_sg_suffix.hex}"
   description = "Allow inbound web traffic"
   vpc_id      = module.network.vpc_id
 
@@ -263,6 +311,18 @@ module "redis" {
 }
 
 # -----------------------------------------------------------------------------
+# PARAMETER STORE
+# -----------------------------------------------------------------------------
+
+resource "aws_ssm_parameter" "database_url" {
+  name  = "/${local.name_prefix}/database_url"
+  type  = "SecureString"
+  value = module.rds.secret_arn
+
+  tags = local.tags
+}
+
+# -----------------------------------------------------------------------------
 # SECRETS
 # -----------------------------------------------------------------------------
 
@@ -316,6 +376,17 @@ locals {
       value_from = value
     }
   ]
+
+  # Default environment variables for the Django application
+  default_environment = {
+    DJANGO_ENV              = "production"
+    CELERY_BROKER_URL       = "redis://${module.redis.primary_endpoint}:${module.redis.port}/0"
+    CELERY_RESULT_BACKEND   = "redis://${module.redis.primary_endpoint}:${module.redis.port}/0"
+    FRONTEND_URL            = var.frontend_url
+    AWS_STORAGE_BUCKET_NAME = var.create_shared_resources ? module.s3_buckets.static_bucket_name : data.aws_s3_bucket.static[0].bucket
+  }
+
+  ecs_environment = merge(local.default_environment, var.ecs_task_environment)
 }
 
 module "ecs_service" {
@@ -332,7 +403,7 @@ module "ecs_service" {
   desired_count             = var.ecs_desired_count
   cpu                       = var.ecs_cpu
   memory                    = var.ecs_memory
-  environment               = var.ecs_task_environment
+  environment               = local.ecs_environment
   secrets                   = local.ecs_task_secret_bindings
   log_retention_in_days     = var.ecs_log_retention_in_days
   enable_https_listener     = var.enable_https_listener
@@ -343,4 +414,74 @@ module "ecs_service" {
   scale_memory_target       = var.ecs_scale_memory_target
   task_role_policy_arns     = local.ecs_task_role_policy_map
   tags                      = local.tags
+}
+
+# -----------------------------------------------------------------------------
+# CELERY WORKERS
+# -----------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "celery" {
+  name              = "/aws/ecs/${local.name_prefix}-celery"
+  retention_in_days = var.ecs_log_retention_in_days
+
+  tags = merge(local.tags, {
+    Name = "${local.name_prefix}-celery-logs"
+  })
+}
+
+resource "aws_ecs_task_definition" "celery" {
+  family                   = "${local.name_prefix}-celery"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = var.celery_cpu
+  memory                   = var.celery_memory
+  execution_role_arn       = module.ecs_service.task_execution_role_arn
+  container_definitions = jsonencode([
+    {
+      name      = "celery"
+      image     = var.container_image != "" ? var.container_image : "${module.ecr.repository_url}:bootstrap"
+      essential = true
+      command   = ["celery", "-A", "vox_api", "worker", "--loglevel=info"]
+      secrets = [
+        {
+          name      = "DJANGO_SECRET_KEY"
+          valueFrom = aws_secretsmanager_secret_version.django.arn
+        },
+        {
+          name      = "DATABASE_URL"
+          valueFrom = aws_ssm_parameter.database_url.arn
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = "/aws/ecs/${local.name_prefix}-celery"
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "celery"
+        }
+      }
+    }
+  ])
+}
+
+resource "aws_ecs_service" "celery" {
+  name            = "${local.name_prefix}-celery"
+  cluster         = module.ecs_service.cluster_name
+  task_definition = aws_ecs_task_definition.celery.arn
+  desired_count   = var.celery_desired_count
+  launch_type     = "FARGATE"
+  network_configuration {
+    subnets          = module.network.private_app_subnet_ids
+    security_groups  = [aws_security_group.ecs.id]
+    assign_public_ip = false
+  }
+  depends_on = [
+    aws_ssm_parameter.database_url
+  ]
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
+  tags = merge(local.tags, {
+    Name = "${local.name_prefix}-celery"
+  })
 }

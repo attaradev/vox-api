@@ -70,13 +70,13 @@ variable "preferred_backup_window" {
 variable "preferred_maintenance_window" {
   description = "Maintenance window (UTC)"
   type        = string
-  default     = "Sun:03:00-Sun:05:00"
+  default     = "Sun:05:00-Sun:07:00"
 }
 
 variable "multi_az" {
   description = "Create a standby in another AZ"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "storage_encrypted" {

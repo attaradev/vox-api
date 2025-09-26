@@ -245,7 +245,7 @@ variable "redis_node_type" {
 variable "redis_replicas_per_node_group" {
   description = "Replicas per Redis node group"
   type        = number
-  default     = 0
+  default     = 1
 }
 
 variable "redis_num_node_groups" {
@@ -316,4 +316,54 @@ variable "ecr_lifecycle_policy_json" {
   description = "Optional JSON override for the ECR lifecycle policy"
   type        = string
   default     = ""
+}
+
+# Celery worker configuration
+variable "celery_cpu" {
+  description = "CPU units for Celery worker tasks"
+  type        = number
+  default     = 256
+}
+
+variable "celery_memory" {
+  description = "Memory for Celery worker tasks"
+  type        = number
+  default     = 512
+}
+
+variable "celery_desired_count" {
+  description = "Desired number of Celery worker tasks"
+  type        = number
+  default     = 1
+}
+
+# Infrastructure creation flags
+variable "create_shared_resources" {
+  description = "Whether to create shared resources like S3 buckets, ECR, etc."
+  type        = bool
+  default     = true
+}
+
+variable "create_iam_role" {
+  description = "Whether to create IAM roles for ECS tasks"
+  type        = bool
+  default     = true
+}
+
+variable "create_cloudwatch_log_groups" {
+  description = "Whether to create CloudWatch log groups"
+  type        = bool
+  default     = true
+}
+
+variable "create_alb" {
+  description = "Whether to create Application Load Balancer"
+  type        = bool
+  default     = true
+}
+
+variable "frontend_url" {
+  description = "Frontend URL for password reset links and CORS"
+  type        = string
+  default     = "https://your-frontend-domain.com"
 }

@@ -1,22 +1,24 @@
 # Vox API Terraform Infrastructure
 
-This directory contains the production-ready Terraform configuration for deploying Vox API into AWS with a secure, highly-available baseline. Key design goals include:
+This directory contains the production-ready Terraform configuration for deploying Vox API into AWS with a secure, highly-available baseline. The infrastructure is now consolidated into a single `main.tf` file with clear sections for better maintainability and reduced complexity.
+
+Key design goals include:
 
 - All compute, databases, and caches run in private subnets; only the Application Load Balancer is public.
 - Encryption everywhere: RDS, ElastiCache, S3 buckets, and Secrets Manager all enforce encryption at rest and in transit.
 - Operational resilience via multi-AZ networking, redundant NAT gateways, autoscaling ECS services, and managed backing services.
-- Maintainable, modular Terraform code that cleanly separates network, compute, data, and storage concerns.
+- Consolidated, maintainable Terraform code that cleanly separates concerns within a single file.
 
 ## Architecture Overview
 
 Provisioned components include:
 
 - **Networking:** Dedicated VPC with public, private application, and private data subnets across multiple AZs; internet gateway, NAT gateways, VPC flow logs, and private VPC endpoints for AWS APIs frequently used by the workload.
-- **Compute:** AWS Fargate/ECS cluster with an autoscaled service fronted by an Application Load Balancer. ALB access logs are retained in a locked-down S3 bucket.
+- **Compute:** AWS Fargate/ECS cluster with separate autoscaled services for the Django API (fronted by an Application Load Balancer) and Celery background workers. ALB access logs are retained in a locked-down S3 bucket.
 - **Data:** Amazon RDS for PostgreSQL and ElastiCache for Redis (encryption enabled). Defaults favour development labs (`db.t3.micro`, `cache.t4g.micro`, single-AZ) and can be scaled up via variables. Credentials and auth tokens are rotated automatically and stored securely in AWS Secrets Manager.
 - **Storage:** Private S3 buckets for static assets and media uploads with versioning, lifecycle policies, and default encryption.
 - **Container Registry:** Private Amazon ECR repository with scan-on-push, tag immutability, and lifecycle rules for pruning older images.
-- **Secrets & Config:** Dedicated Secrets Manager entries for the Django secret key, database credentials, and Redis connection information, including ready-to-use connection strings that are wired into the ECS task definition by default.
+- **Secrets & Config:** Dedicated Secrets Manager entries for the Django secret key, database credentials, and Redis connection information, including ready-to-use connection strings that are wired into the ECS task definitions by default.
 
 The resulting infrastructure isolates all stateful services in private subnets and exposes only the ALB to the public internet.
 
@@ -44,12 +46,15 @@ The resulting infrastructure isolates all stateful services in private subnets a
 ```md
 infra/terraform/
 ├── backend.tf             # Remote state (S3 + DynamoDB) configuration
-├── locals.tf              # Shared name/tag helpers
-├── main.tf                # Root module wiring all components together
+├── main.tf                # Consolidated configuration with clear sections:
+│   ├── Terraform & Provider configuration
+│   ├── Networking (VPC, subnets, security groups)
+│   ├── Storage (S3 buckets, ECR, IAM policies)
+│   ├── Data Layer (RDS, Redis)
+│   ├── Compute (ECS API service + Celery workers)
+│   └── Secrets (Secrets Manager, SSM parameters)
 ├── outputs.tf             # Surface key connection details and secrets
-├── providers.tf           # AWS provider configuration with default tags
-├── variables.tf           # Root module inputs
-├── versions.tf            # Terraform & provider version constraints
+├── variables.tf           # Root module inputs with validation
 ├── terraform.tfvars.example
 └── modules/
     ├── ecs_service/       # ECS cluster, service, ALB, IAM
@@ -60,7 +65,7 @@ infra/terraform/
     └── s3_buckets/        # Static & media buckets with encryption
 ```
 
-Each module exposes outputs used by the top-level configuration and can be re-used independently if you need custom compositions later.
+The consolidated `main.tf` approach eliminates the previous fragmentation while maintaining clear section organization for better readability and maintenance.
 
 ## Getting Started
 
@@ -136,6 +141,8 @@ After the apply succeeds, use the outputs to configure DNS (ALB details), update
 - `alb_allowed_cidrs` – restrict incoming traffic to the load balancer.
 - `ecs_task_environment` – inject additional environment variables into the running containers.
 - `ecs_task_secrets` – optional overrides for the default database/redis/Django secrets that Terraform provisions automatically (provide unique secret names per entry).
+- `celery_cpu`, `celery_memory`, `celery_desired_count` – configure Celery worker resources and scaling.
+- `frontend_url` – base URL for password reset links and CORS configuration.
 - `single_nat_gateway` – default `true` to share a single NAT gateway across AZs (lower cost); disable if you require per-AZ redundancy.
 - `db_*` and `redis_*` variables – tune instance shapes, retention, or password overrides.
 - `s3_force_destroy` – defaults to `false` to protect data; set `true` only in ephemeral environments.
@@ -147,7 +154,7 @@ See `variables.tf` for the complete list of tunables.
 
 - **Private-only data plane:** ECS tasks, PostgreSQL, and Redis live in private subnets. NAT gateways and VPC endpoints enable outbound access without exposing instances.
 - **Managed secrets:** Passwords, auth tokens, and the Django secret key are generated automatically and persisted in Secrets Manager.
-- **Resilience:** Multi-AZ deployments for RDS and Redis, ALB health checks, ECS circuit breakers, and autoscaling policies keep the service responsive to failures or load spikes.
+- **Resilience:** Single-instance deployments for RDS and Redis by default (configurable to multi-AZ), ALB health checks, ECS circuit breakers, and autoscaling policies keep the service responsive to failures or load spikes.
 - **Observability:** VPC flow logs and structured ECS logs land in CloudWatch; ALB access logs are delivered to an encrypted S3 bucket.
 
 ## Next Steps

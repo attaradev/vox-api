@@ -9,7 +9,7 @@
 - Subscription billing powered by dj-stripe with webhook handlers and usage tracking
 - Celery + Redis workers for async jobs (email, notifications, heavy tasks) and Flower monitoring
 - Sentry-ready error hooks, health checks, and Docker-first tooling for dependable deployments
-- **Modular Terraform infrastructure for AWS cloud deployment**
+- **Consolidated Terraform infrastructure** for AWS cloud deployment with dedicated API and Celery services
 
 ## Prerequisites
 
@@ -52,6 +52,30 @@
    - Interactive API docs: <http://localhost:8000/api/docs/>
    - OpenAPI schema: <http://localhost:8000/api/schema/>
 
+### Seed Sample Data
+
+For development and testing, populate the database with realistic sample data:
+
+```bash
+docker compose exec api python manage.py seed_data
+```
+
+This creates:
+
+- **Account tiers**: Free, Pro, and Enterprise with different limits and pricing
+- **Sample accounts**: Acme Corp (Pro), StartupXYZ (Free), TechGiant Inc (Enterprise), LocalCafe (Free, pending)
+- **Users with roles**: Owners, admins, and members across different accounts
+- **Active polls**: Team building events, product feedback, office preferences
+- **Sample votes**: Demonstrates voting functionality across different polls
+
+**Default login credentials:**
+
+- `alice_smith` / `password123` (Owner of Acme Corp)
+- `diana_prince` / `password123` (Owner of StartupXYZ)
+- `eve_adams` / `password123` (Owner of TechGiant Inc)
+
+Use these accounts to explore multi-tenant features, role permissions, and poll voting workflows.
+
 ### Background workers & monitoring
 
 ```bash
@@ -69,7 +93,7 @@ docker compose up -d celery flower
 
 ## Cloud Infrastructure (Terraform)
 
-This project ships with modular Terraform code for secure AWS deployment. See `infra/terraform/README.md` for full instructions.
+This project ships with consolidated Terraform code for secure AWS deployment. The infrastructure is now organized in a single `main.tf` file with clear sections for better maintainability. See `infra/terraform/README.md` for full instructions.
 
 **Remote state backend:**
 
@@ -78,11 +102,11 @@ This project ships with modular Terraform code for secure AWS deployment. See `i
 **Provisioned resources:**
 
 - VPC, subnets, NAT gateway, endpoints, flow logs
-- ECS cluster, security groups, IAM roles
+- ECS cluster with separate services for API and Celery workers
+- Security groups, IAM roles, and CloudWatch log groups
 - RDS (Postgres), ElastiCache (Redis)
 - S3 buckets for media/static and logs
 - ALB (Application Load Balancer)
-- CloudWatch log groups
 - Secrets Manager for credentials
 
 **Outputs for domain setup:**
@@ -104,6 +128,8 @@ This project ships with modular Terraform code for secure AWS deployment. See `i
 2. Run `terraform init`, `terraform plan`, and `terraform apply` in `infra/terraform`.
 3. Use the outputs to configure your DNS/domain and connect your app to cloud resources.
 
+The infrastructure includes both API and Celery worker services, providing complete background job processing capabilities.
+
 ## Local Development Without Docker
 
 1. Create a virtual environment and install dependencies
@@ -124,7 +150,13 @@ This project ships with modular Terraform code for secure AWS deployment. See `i
    python manage.py runserver 0.0.0.0:8000
    ```
 
-5. Start Celery if you need background jobs
+5. (Optional) Seed sample data for development
+
+   ```bash
+   python manage.py seed_data
+   ```
+
+6. Start Celery if you need background jobs
 
    ```bash
    celery -A vox_api worker --loglevel=info
@@ -153,6 +185,7 @@ This project ships with modular Terraform code for secure AWS deployment. See `i
 | `core/` | Shared utilities, the `AuditLog` model, and admin registrations |
 | `polls/` | Poll, choice, and voter token flows |
 | `vox_api/` | Django project settings, URLs, Celery app, and health checks |
+| `infra/terraform/` | **Consolidated Terraform infrastructure** (single `main.tf` with clear sections) |
 | `compose.yml` | Docker Compose services (API, Celery, Flower, Postgres, Redis) |
 | `Dockerfile` | Runtime image based on Python 3.12-slim |
 | `docker-entrypoint.sh` | Waits for Postgres and applies migrations before boot |
@@ -170,7 +203,7 @@ This project uses `drf-spectacular` to generate OpenAPI schemas. Browse the inte
 
 ## Background Jobs & Email
 
-- Celery workers process asynchronous tasks such as transactional emails and audit events.
+- **Celery workers** process asynchronous tasks such as transactional emails, notifications, and audit events. The infrastructure now includes a dedicated ECS service for Celery workers alongside the main API service.
 - Celery defaults to the in-memory broker/result backend for local development; point `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` at Redis or another durable service in production.
 - Flower offers live worker monitoring and task introspection at `http://localhost:5555/`.
 - Email is handled via Django's email backend; set SMTP credentials in `.env`.

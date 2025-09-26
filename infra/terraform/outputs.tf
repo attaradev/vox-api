@@ -43,6 +43,16 @@ output "ecs_task_family" {
   description = "Task definition family name for the ECS service"
 }
 
+output "celery_service_name" {
+  value       = aws_ecs_service.celery.name
+  description = "Name of the Celery ECS service"
+}
+
+output "celery_task_family" {
+  value       = aws_ecs_task_definition.celery.family
+  description = "Task definition family name for the Celery service"
+}
+
 output "db_endpoint" {
   value       = module.rds.endpoint
   description = "Postgres endpoint"
