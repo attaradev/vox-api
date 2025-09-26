@@ -62,7 +62,6 @@ infra/terraform/*.tfstate
 infra/terraform/*.tfstate.*
 infra/terraform/*.tfplan
 infra/terraform/terraform.tfvars
-infra/terraform/variables.tf
 infra/terraform/main.tf.backup
 infra/terraform/modules/**/.terraform/
 infra/terraform/modules/**/.terraform.lock.hcl
