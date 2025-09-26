@@ -14,6 +14,6 @@ output "target_group_arn" {
 }
 
 output "alb_ip_addresses" {
-  description = "List of IP addresses for the Application Load Balancer (for DNS/domain setup)"
-  value       = aws_lb.app.ip_address_type == "ipv4" ? aws_lb.app.load_balancer_addresses[*].ip_address : []
+  description = "DNS name of the Application Load Balancer (for DNS/domain setup)"
+  value       = aws_lb.app.dns_name
 }

@@ -188,7 +188,7 @@ resource "aws_ecs_task_definition" "app" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          awslogs-group         = module.cloudwatch.log_group_id
+          awslogs-group         = module.cloudwatch.log_group_name
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "ecs"
         }
