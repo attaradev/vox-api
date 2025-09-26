@@ -20,9 +20,6 @@ env:
   AWS_REGION: us-east-1
   TF_WORKDIR: infra/terraform
   TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
-  ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
-  ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
-  ECS_TASK_FAMILY: ${{ secrets.ECS_TASK_FAMILY }}
   DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
 
 jobs:
@@ -77,8 +74,11 @@ jobs:
     needs: [bootstrap_state]
     permissions: { id-token: write, contents: read }
     outputs:
-      ecr_repo_url: ${{ steps.outputs_step.outputs.ecr_repo_url }}
+      ecr_repo_url: ${{ steps.outputs_step.outputs.ecr_repo_url || '' }}
       apply_requested: ${{ steps.apply_mode.outputs.auto_apply }}
+      ecs_cluster_name: ${{ steps.outputs_step.outputs.ecs_cluster_name || '' }}
+      ecs_service_name: ${{ steps.outputs_step.outputs.ecs_service_name || '' }}
+      ecs_task_family: ${{ steps.outputs_step.outputs.ecs_task_family || '' }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
@@ -120,10 +120,16 @@ jobs:
           BUCKET: ${{ env.TF_STATE_BUCKET }}
         run: |
           set -euo pipefail
-          terraform init -input=false \
+          terraform init -reconfigure -input=false \
             -backend-config="bucket=$BUCKET" \
             -backend-config="key=${TF_BACKEND_KEY}" \
             -backend-config="region=${{ env.AWS_REGION }}"
+
+      - name: Select Terraform workspace
+        working-directory: ${{ env.TF_WORKDIR }}
+        run: |
+          set -euo pipefail
+          terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null || terraform workspace new "${{ env.DEPLOY_ENV }}"
 
       - name: Terraform Validate & Plan
         working-directory: ${{ env.TF_WORKDIR }}
@@ -142,22 +148,32 @@ jobs:
 
       - name: Capture outputs
         id: outputs_step
+        if: steps.apply_mode.outputs.auto_apply == 'true'
         working-directory: ${{ env.TF_WORKDIR }}
         run: |
           set -euo pipefail
-          if terraform output -raw ecr_repository_url >/dev/null 2>&1; then
-            echo "ecr_repo_url=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
-          else
-            # fallback strip quotes
-            echo "ecr_repo_url=$(terraform output ecr_repository_url | tr -d '"')" >> "$GITHUB_OUTPUT"
-          fi
+          extract_output() {
+            local name="$1"
+            if value=$(terraform output -raw "$name" 2>/dev/null); then
+              echo "$name=${value}" >> "$GITHUB_OUTPUT"
+            else
+              echo "Output $name not available" >&2
+            fi
+          }
+
+          extract_output ecr_repository_url
+          extract_output ecs_cluster_name
+          extract_output ecs_service_name
+          extract_output ecs_task_family
 
       - name: Show non-sensitive outputs
+        if: steps.apply_mode.outputs.auto_apply == 'true'
         working-directory: ${{ env.TF_WORKDIR }}
         run: |
           set -euo pipefail
-          terraform output -no-color alb_dns_name || true
-          terraform output -no-color alb_hosted_zone_id || true
+          echo "Terraform outputs:"
+          terraform output -no-color alb_dns_name 2>/dev/null || echo "alb_dns_name: not available"
+          terraform output -no-color alb_hosted_zone_id 2>/dev/null || echo "alb_hosted_zone_id: not available"
 
   build_and_push_image:
     name: Build & Push Image
@@ -192,6 +208,10 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
+          if [ -z "$ECR_REPO_URL" ]; then
+            echo "Error: ECR repository URL not available" >&2
+            exit 1
+          fi
           IMAGE="${ECR_REPO_URL}:${IMAGE_TAG}"
           docker build --pull --tag "$IMAGE" .
           docker push "$IMAGE"
@@ -224,10 +244,14 @@ jobs:
       - name: Register new task definition revision
         id: register_td
         env:
-          ECS_TASK_FAMILY: ${{ env.ECS_TASK_FAMILY }}
+          ECS_TASK_FAMILY: ${{ needs.terraform_infra.outputs.ecs_task_family }}
           NEW_IMAGE: ${{ needs.build_and_push_image.outputs.image }}
         run: |
           set -euo pipefail
+          if [ -z "$ECS_TASK_FAMILY" ]; then
+            echo "Error: ECS task family output was empty" >&2
+            exit 1
+          fi
           aws ecs describe-task-definition \
             --task-definition "$ECS_TASK_FAMILY" \
             --query 'taskDefinition' > td.json
@@ -242,11 +266,15 @@ jobs:
 
       - name: Update ECS service
         env:
-          ECS_CLUSTER: ${{ env.ECS_CLUSTER }}
-          ECS_SERVICE: ${{ env.ECS_SERVICE }}
+          ECS_CLUSTER: ${{ needs.terraform_infra.outputs.ecs_cluster_name }}
+          ECS_SERVICE: ${{ needs.terraform_infra.outputs.ecs_service_name }}
           TASK_DEF_ARN: ${{ steps.register_td.outputs.task_definition_arn }}
         run: |
           set -euo pipefail
+          if [ -z "$ECS_CLUSTER" ] || [ -z "$ECS_SERVICE" ]; then
+            echo "Error: ECS cluster/service outputs were empty" >&2
+            exit 1
+          fi
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
             --service "$ECS_SERVICE" \

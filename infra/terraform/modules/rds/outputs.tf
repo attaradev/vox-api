@@ -1,14 +1,24 @@
-output "rds_instance_id" {
-  description = "ID of the RDS instance"
-  value       = module.rds.db_instance_identifier
+output "endpoint" {
+  value       = aws_db_instance.this.address
+  description = "Writer endpoint for the database"
 }
 
-output "rds_endpoint" {
-  description = "RDS endpoint"
-  value       = module.rds.db_instance_endpoint
+output "port" {
+  value       = aws_db_instance.this.port
+  description = "Port of the database"
 }
 
-output "rds_port" {
-  description = "RDS port"
-  value       = module.rds.db_instance_port
+output "security_group_id" {
+  value       = aws_security_group.this.id
+  description = "Security group protecting the database"
+}
+
+output "secret_arn" {
+  value       = aws_secretsmanager_secret.this.arn
+  description = "ARN of the Secrets Manager secret containing credentials"
+}
+
+output "identifier" {
+  value       = aws_db_instance.this.id
+  description = "Identifier of the RDS instance"
 }

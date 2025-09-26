@@ -127,3 +127,4 @@ jobs:
           workflow: deploy.yml
           token: ${{ secrets.GITHUB_TOKEN }}
           ref: ${{ github.ref }}
+          inputs: '{"auto_apply": "true"}'

@@ -74,7 +74,6 @@ This project ships with modular Terraform code for secure AWS deployment. See `i
 **Remote state backend:**
 
 - S3 bucket: `vox-api-terraform-state` (must be created before `terraform init`)
-- DynamoDB table: `vox-api-terraform-lock` (for state locking)
 
 **Provisioned resources:**
 
@@ -97,9 +96,11 @@ This project ships with modular Terraform code for secure AWS deployment. See `i
 
   Use these values to set up your custom domain or CNAME records.
 
+  Additional outputs such as `ecs_cluster_name`, `ecs_service_name`, and `ecs_task_family` are consumed by the GitHub deploy workflow to register new task definitions without hard-coding resource ARNs.
+
 **Onboarding steps:**
 
-1. Create the S3 bucket and DynamoDB table for state backend (see infra README).
+1. Create the S3 bucket for state backend (see infra README).
 2. Run `terraform init`, `terraform plan`, and `terraform apply` in `infra/terraform`.
 3. Use the outputs to configure your DNS/domain and connect your app to cloud resources.
 

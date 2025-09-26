@@ -213,6 +213,7 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",
     "drf_spectacular",
     "accounts",
+    "auth",
     "polls",
     "billing",
     "core",

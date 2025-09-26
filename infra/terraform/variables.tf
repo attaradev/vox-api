@@ -1,286 +1,313 @@
 variable "aws_region" {
-  description = "AWS region to deploy resources"
+  description = "AWS region for all resources"
   type        = string
   default     = "us-east-1"
 }
 
-variable "environment" {
-  description = "Deployment environment (e.g., dev, staging, prod)"
+variable "project" {
+  description = "Project tag and naming seed"
   type        = string
-  default     = "production"
+  default     = "vox-api"
 }
 
-variable "skip_aws_account_checks" {
-  description = "Skip AWS account validation checks (useful for local/offline workflows)"
-  type        = bool
-  default     = false
+variable "environment" {
+  description = "Environment name (e.g. dev, staging, prod)"
+  type        = string
+  default     = "dev"
 }
 
 variable "additional_tags" {
-  description = "Additional tags to merge into all tagged resources"
+  description = "Additional tags to apply to resources"
   type        = map(string)
   default     = {}
 }
 
-variable "vpc_name" {
-  description = "Name of the VPC"
-  type        = string
-  default     = "vox-api-vpc"
-}
-
-variable "vpc_cidr" {
+variable "vpc_cidr_block" {
   description = "CIDR block for the VPC"
   type        = string
   default     = "10.0.0.0/16"
 }
 
-variable "azs" {
-  description = "Availability zones"
+variable "availability_zones" {
+  description = "Optional list of AZs to use; defaults to the first two available"
   type        = list(string)
-  default     = ["us-east-1a", "us-east-1b"]
+  default     = []
 }
 
-variable "private_subnets" {
-  description = "Private subnet CIDRs"
+variable "public_subnet_cidrs" {
+  description = "Optional list of CIDRs for public subnets. Must match the number of AZs when supplied."
   type        = list(string)
-  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+  default     = []
 }
 
-variable "public_subnets" {
-  description = "Public subnet CIDRs"
+variable "private_app_subnet_cidrs" {
+  description = "Optional list of CIDRs for private subnets that host ECS tasks"
   type        = list(string)
-  default     = ["10.0.101.0/24", "10.0.102.0/24"]
+  default     = []
 }
 
-variable "ecs_cluster_name" {
-  description = "ECS cluster name"
+variable "private_data_subnet_cidrs" {
+  description = "Optional list of CIDRs for private subnets that host data services"
+  type        = list(string)
+  default     = []
+}
+
+variable "container_image" {
+  description = "Optional full URI to the container image for the API service"
   type        = string
-  default     = "vox-api-ecs-cluster"
+  default     = ""
 }
 
-variable "asg_sg_name" {
-  description = "Security group name for ECS tasks"
-  type        = string
-  default     = "vox-api-ecs-sg"
+variable "container_port" {
+  description = "Application port exposed by the container"
+  type        = number
+  default     = 8000
 }
 
-variable "asg_allowed_cidr_blocks" {
-  description = "Allowed CIDR blocks for ECS SG ingress"
+variable "alb_allowed_cidrs" {
+  description = "CIDR ranges allowed to access the ALB"
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
 
-variable "alb_name" {
-  description = "Name of the Application Load Balancer"
-  type        = string
-  default     = "vox-api-alb"
-}
-
-variable "alb_target_group_name" {
-  description = "Name of the ALB target group"
-  type        = string
-  default     = "vox-api-alb-tg"
-}
-
-variable "alb_logs_bucket" {
-  description = "S3 bucket for ALB access logs"
-  type        = string
-  default     = "vox-api-logs"
-}
-
-variable "cloudwatch_log_group_name" {
-  description = "CloudWatch log group name for ECS logs"
-  type        = string
-  default     = "vox-api-ecs-logs"
-}
-
-variable "cloudwatch_kms_key_id" {
-  description = "KMS key ID for CloudWatch log group encryption"
-  type        = string
-  default     = ""
-}
-
-variable "elasticache_cluster_id" {
-  description = "Redis replication group ID"
-  type        = string
-  default     = "vox-api-redis-cluster"
-}
-
-variable "elasticache_node_type" {
-  description = "Redis node type"
-  type        = string
-  default     = "cache.t3.micro"
-}
-
-variable "elasticache_num_cache_nodes" {
-  description = "Number of Redis nodes"
-  type        = number
-  default     = 1
-}
-
-variable "elasticache_subnet_group_name" {
-  description = "Name of the ElastiCache subnet group"
-  type        = string
-  default     = "vox-api-redis-subnet-group"
-}
-
-variable "elasticache_subnet_ids" {
-  description = "Subnet IDs for Redis"
-  type        = list(string)
-  default     = []
-}
-
-variable "elasticache_security_group_ids" {
-  description = "Security group IDs for Redis"
-  type        = list(string)
-  default     = []
-}
-
-variable "rds_identifier" {
-  description = "RDS instance identifier"
-  type        = string
-  default     = "vox-api-rds"
-}
-
-variable "rds_instance_class" {
-  description = "RDS instance class"
-  type        = string
-  default     = "db.t3.micro"
-}
-
-variable "rds_multi_az" {
-  description = "Whether to deploy the RDS instance with Multi-AZ enabled"
+variable "enable_https_listener" {
+  description = "Enable an HTTPS listener (requires certificate_arn)"
   type        = bool
   default     = false
 }
 
-variable "db_username" {
-  description = "Database username"
+variable "certificate_arn" {
+  description = "ACM certificate ARN used when enable_https_listener is true"
   type        = string
-  default     = "postgres"
+  default     = ""
+}
+
+variable "ecs_desired_count" {
+  description = "Desired ECS task count"
+  type        = number
+  default     = 2
+}
+
+variable "ecs_cpu" {
+  description = "CPU units for each ECS task"
+  type        = number
+  default     = 512
+}
+
+variable "ecs_memory" {
+  description = "Memory (MB) for each ECS task"
+  type        = number
+  default     = 1024
+}
+
+variable "ecs_task_environment" {
+  description = "Environment variables injected into the ECS task"
+  type        = map(string)
+  default     = {}
+}
+
+variable "ecs_task_secrets" {
+  description = "Secrets injected into the ECS task"
+  type = list(object({
+    name       = string
+    value_from = string
+  }))
+  default = []
+}
+
+variable "ecs_task_role_policy_arns" {
+  description = "Additional IAM policies to attach to the ECS task role"
+  type        = list(string)
+  default     = []
+}
+
+variable "ecs_log_retention_in_days" {
+  description = "Log retention period for ECS log group"
+  type        = number
+  default     = 30
+}
+
+variable "ecs_scale_min_capacity" {
+  description = "Minimum task count for autoscaling"
+  type        = number
+  default     = 2
+}
+
+variable "ecs_scale_max_capacity" {
+  description = "Maximum task count for autoscaling"
+  type        = number
+  default     = 6
+}
+
+variable "ecs_scale_cpu_target" {
+  description = "Target CPU utilization for autoscaling"
+  type        = number
+  default     = 60
+}
+
+variable "ecs_scale_memory_target" {
+  description = "Target memory utilization for autoscaling"
+  type        = number
+  default     = 75
 }
 
 variable "db_name" {
-  description = "Database name"
+  description = "Name of the application database"
   type        = string
-  default     = "voxapidb"
+  default     = "voxapi"
 }
 
-variable "rds_vpc_security_group_ids" {
-  description = "Security group IDs for RDS"
+variable "db_username" {
+  description = "Master username for Postgres"
+  type        = string
+  default     = "voxapi"
+}
+
+variable "db_engine_version" {
+  description = "Postgres engine version"
+  type        = string
+  default     = "15.4"
+}
+
+variable "db_instance_class" {
+  description = "Instance class for Postgres"
+  type        = string
+  default     = "db.t4g.medium"
+}
+
+variable "db_allocated_storage" {
+  description = "Initial storage size for Postgres"
+  type        = number
+  default     = 20
+}
+
+variable "db_max_allocated_storage" {
+  description = "Maximum autoscaling storage for Postgres"
+  type        = number
+  default     = 100
+}
+
+variable "db_backup_retention_period" {
+  description = "Backup retention in days for Postgres"
+  type        = number
+  default     = 7
+}
+
+variable "db_multi_az" {
+  description = "Provision multi-AZ Postgres standby"
+  type        = bool
+  default     = true
+}
+
+variable "db_apply_immediately" {
+  description = "Apply RDS changes immediately"
+  type        = bool
+  default     = false
+}
+
+variable "db_existing_password" {
+  description = "Optional existing database password"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "db_secret_name" {
+  description = "Optional override for the Postgres secret name"
+  type        = string
+  default     = ""
+}
+
+variable "db_additional_allowed_security_group_ids" {
+  description = "Additional security groups allowed to access Postgres"
   type        = list(string)
   default     = []
 }
 
-variable "rds_subnet_ids" {
-  description = "Subnet IDs for RDS"
-  type        = list(string)
-  default     = []
-}
-
-variable "s3_bucket_name" {
-  description = "S3 bucket name for media/static files"
+variable "redis_engine_version" {
+  description = "Redis engine version"
   type        = string
-  default     = "vox-api-media"
+  default     = "7.1"
 }
 
-variable "iam_role_name" {
-  description = "IAM role name for ECS task execution"
+variable "redis_node_type" {
+  description = "Redis node instance type"
   type        = string
-  default     = "vox-api-ecs-task-execution-role"
+  default     = "cache.t3.medium"
 }
 
-variable "iam_inline_policy_json" {
-  description = "Inline policy JSON for IAM role"
+variable "redis_replicas_per_node_group" {
+  description = "Replicas per Redis node group"
+  type        = number
+  default     = 1
+}
+
+variable "redis_num_node_groups" {
+  description = "Redis node groups (shards)"
+  type        = number
+  default     = 1
+}
+
+variable "redis_snapshot_retention_limit" {
+  description = "Redis snapshot retention days"
+  type        = number
+  default     = 7
+}
+
+variable "redis_maintenance_window" {
+  description = "Redis maintenance window"
+  type        = string
+  default     = "Sun:05:00-Sun:06:00"
+}
+
+variable "redis_snapshot_window" {
+  description = "Redis snapshot window"
+  type        = string
+  default     = "04:00-05:00"
+}
+
+variable "s3_force_destroy" {
+  description = "Allow Terraform to delete non-empty S3 buckets"
+  type        = bool
+  default     = false
+}
+
+variable "ecr_image_tag_mutability" {
+  description = "Controls whether image tags can be overwritten (MUTABLE or IMMUTABLE)"
+  type        = string
+  default     = "IMMUTABLE"
+
+  validation {
+    condition     = contains(["MUTABLE", "IMMUTABLE"], var.ecr_image_tag_mutability)
+    error_message = "ecr_image_tag_mutability must be MUTABLE or IMMUTABLE"
+  }
+}
+
+variable "ecr_scan_on_push" {
+  description = "Enable image scanning on push for the ECR repository"
+  type        = bool
+  default     = true
+}
+
+variable "ecr_encryption_type" {
+  description = "Encryption type for the ECR repository (AES256 or KMS)"
+  type        = string
+  default     = "AES256"
+
+  validation {
+    condition     = contains(["AES256", "KMS"], var.ecr_encryption_type)
+    error_message = "ecr_encryption_type must be AES256 or KMS"
+  }
+}
+
+variable "ecr_encryption_kms_key" {
+  description = "KMS key ARN when using KMS encryption for the ECR repository"
   type        = string
   default     = ""
 }
 
-variable "asm_secret_name" {
-  description = "Secrets Manager secret name for RDS credentials"
-  type        = string
-  default     = "vox-api-rds-credentials"
-}
-
-variable "asm_secret_access_policy_json" {
-  description = "Resource policy JSON for ASM secret access"
+variable "ecr_lifecycle_policy_json" {
+  description = "Optional JSON override for the ECR lifecycle policy"
   type        = string
   default     = ""
-}
-
-
-
-variable "vpc_flow_log_group_name" {
-  description = "CloudWatch log group name for VPC flow logs"
-  type        = string
-  default     = "vox-api-vpc-flow-logs"
-}
-
-variable "vpc_flow_log_role_arn" {
-  description = "IAM role ARN for VPC flow logs"
-  type        = string
-  default     = ""
-}
-
-variable "ecr_repository_name" {
-  description = "Name of the ECR repository for the app image."
-  type        = string
-  default     = "vox-api"
-}
-
-variable "ecs_task_family" {
-  description = "ECS task definition family name."
-  type        = string
-  default     = "vox-api-task"
-}
-
-variable "ecs_task_cpu" {
-  description = "CPU units for ECS task."
-  type        = string
-  default     = "512"
-}
-
-variable "ecs_task_memory" {
-  description = "Memory (MB) for ECS task."
-  type        = string
-  default     = "1024"
-}
-
-variable "image_tag" {
-  description = "Docker image tag to deploy."
-  type        = string
-  default     = "latest"
-}
-
-
-variable "ecs_service_name" {
-  description = "Name of the ECS service."
-  type        = string
-  default     = "vox-api-service"
-}
-
-variable "ecs_task_execution_policy_arns" {
-  description = "List of IAM policy ARNs for ECS task execution role (SSM, Secrets Manager access)."
-  type        = list(string)
-  default = [
-    "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
-    "arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess",
-    "arn:aws:iam::aws:policy/SecretsManagerReadOnlyAccess"
-  ]
-}
-
-variable "default_capacity_provider_strategy" {
-  description = "Capacity provider strategy for ECS cluster"
-  type = map(object({
-    base   = optional(number)
-    name   = optional(string)
-    weight = optional(number)
-  }))
-  default = null
-}
-
-variable "db_family" {
-  description = "The family of the DB parameter group"
-  type        = string
-  default     = "postgres15"
 }
