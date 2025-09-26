@@ -179,8 +179,6 @@ resource "aws_lb_target_group" "this" {
 }
 
 resource "aws_lb_listener" "http" {
-  count = var.enable_https_listener ? 0 : 1
-
   load_balancer_arn = aws_lb.this.arn
   port              = 80
   protocol          = "HTTP"
@@ -191,26 +189,8 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-resource "aws_lb_listener" "http_redirect" {
-  count = var.enable_https_listener ? 1 : 0
-
-  load_balancer_arn = aws_lb.this.arn
-  port              = 80
-  protocol          = "HTTP"
-
-  default_action {
-    type = "redirect"
-
-    redirect {
-      port        = "443"
-      protocol    = "HTTPS"
-      status_code = "HTTP_301"
-    }
-  }
-}
-
 resource "aws_lb_listener" "https" {
-  count = var.enable_https_listener ? 1 : 0
+  count = length(var.certificate_arn) > 0 ? 1 : 0
 
   load_balancer_arn = aws_lb.this.arn
   port              = 443
@@ -221,13 +201,6 @@ resource "aws_lb_listener" "https" {
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.this.arn
-  }
-
-  lifecycle {
-    precondition {
-      condition     = length(var.certificate_arn) > 0
-      error_message = "certificate_arn must be provided when enable_https_listener is true"
-    }
   }
 }
 

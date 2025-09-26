@@ -90,14 +90,8 @@ variable "secrets" {
   default = []
 }
 
-variable "enable_https_listener" {
-  description = "Create an HTTPS listener on port 443"
-  type        = bool
-  default     = false
-}
-
 variable "certificate_arn" {
-  description = "ACM certificate ARN for HTTPS listener"
+  description = "ACM certificate ARN for HTTPS listener (optional - if provided, HTTPS listener will be created)"
   type        = string
   default     = ""
 }

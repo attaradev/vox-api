@@ -410,7 +410,6 @@ module "ecs_service" {
   environment               = local.ecs_environment
   secrets                   = local.ecs_task_secret_bindings
   log_retention_in_days     = var.ecs_log_retention_in_days
-  enable_https_listener     = var.enable_https_listener
   certificate_arn           = var.certificate_arn
   scale_min_capacity        = var.ecs_scale_min_capacity
   scale_max_capacity        = var.ecs_scale_max_capacity
