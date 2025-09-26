@@ -137,3 +137,9 @@ variable "secrets_arns" {
   type        = list(string)
   default     = []
 }
+
+variable "tags" {
+  description = "Tags to propagate to ECS resources"
+  type        = map(string)
+  default     = {}
+}
