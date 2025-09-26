@@ -38,7 +38,7 @@ resource "aws_security_group" "this" {
 }
 
 resource "aws_security_group_rule" "ingress" {
-  for_each = toset(var.allowed_security_group_ids)
+  for_each = { for idx, sg_id in var.allowed_security_group_ids : tostring(idx) => sg_id }
 
   description              = "Allow database access from trusted security group"
   type                     = "ingress"

@@ -69,8 +69,15 @@ resource "aws_subnet" "private_data" {
   })
 }
 
+locals {
+  public_subnet_keys        = sort(keys(aws_subnet.public))
+  nat_gateway_keys          = var.single_nat_gateway ? slice(local.public_subnet_keys, 0, 1) : local.public_subnet_keys
+  nat_gateway_subnet_lookup = { for key in local.nat_gateway_keys : key => aws_subnet.public[key] }
+  primary_nat_gateway_key   = local.nat_gateway_keys[0]
+}
+
 resource "aws_eip" "nat" {
-  for_each = aws_subnet.public
+  for_each = local.nat_gateway_subnet_lookup
 
   domain = "vpc"
 
@@ -80,7 +87,7 @@ resource "aws_eip" "nat" {
 }
 
 resource "aws_nat_gateway" "this" {
-  for_each = aws_subnet.public
+  for_each = local.nat_gateway_subnet_lookup
 
   allocation_id = aws_eip.nat[each.key].id
   subnet_id     = each.value.id
@@ -124,7 +131,7 @@ resource "aws_route" "private_app_outbound" {
   for_each               = aws_route_table.private_app
   route_table_id         = each.value.id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.this[each.key].id
+  nat_gateway_id         = aws_nat_gateway.this[var.single_nat_gateway ? local.primary_nat_gateway_key : each.key].id
 }
 
 resource "aws_route_table_association" "private_app" {
@@ -147,7 +154,7 @@ resource "aws_route" "private_data_outbound" {
   for_each               = aws_route_table.private_data
   route_table_id         = each.value.id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.this[each.key].id
+  nat_gateway_id         = aws_nat_gateway.this[var.single_nat_gateway ? local.primary_nat_gateway_key : each.key].id
 }
 
 resource "aws_route_table_association" "private_data" {

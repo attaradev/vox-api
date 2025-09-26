@@ -127,9 +127,9 @@ variable "scale_memory_target" {
 }
 
 variable "task_role_policy_arns" {
-  description = "Additional IAM policies to attach to the task role"
-  type        = list(string)
-  default     = []
+  description = "Map of IAM policies to attach to the task role (key is descriptive name)"
+  type        = map(string)
+  default     = {}
 }
 
 variable "tags" {

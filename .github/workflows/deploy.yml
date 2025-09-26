@@ -131,6 +131,40 @@ jobs:
           set -euo pipefail
           terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null || terraform workspace new "${{ env.DEPLOY_ENV }}"
 
+      - name: Remove legacy state entries
+        working-directory: ${{ env.TF_WORKDIR }}
+        run: |
+          set -euo pipefail
+          LEGACY_ADDRESSES=(
+            "module.vpc.module.vpc.aws_route.private_nat_gateway[0]"
+            "module.vpc.module.vpc.aws_route_table.private[0]"
+            "module.vpc.module.vpc.aws_route.public_internet_gateway[0]"
+            "module.vpc.module.vpc.aws_subnet.public[0]"
+            "module.vpc.module.vpc.aws_subnet.public[1]"
+            "module.vpc.module.vpc.aws_route_table.public[0]"
+            "module.vpc.module.vpc.aws_subnet.private[0]"
+            "module.vpc.module.vpc.aws_subnet.private[1]"
+            "aws_security_group.alb"
+            "aws_vpc_endpoint.secretsmanager"
+            "aws_security_group.endpoints"
+            "aws_ssm_parameter.database_url"
+            "aws_security_group.ecs_tasks"
+            "aws_vpc_endpoint.s3"
+            "aws_vpc_endpoint.cloudwatch"
+            "aws_security_group.rds"
+            "aws_security_group.redis"
+            "aws_iam_role_policy_attachment.ecs_task_execution[\"arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess\"]"
+            "aws_iam_role_policy_attachment.ecs_task_execution[\"arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy\"]"
+          )
+
+          for addr in "${LEGACY_ADDRESSES[@]}"; do
+            if terraform state show "$addr" >/dev/null 2>&1; then
+              terraform state rm "$addr"
+            fi
+          done
+
+          terraform state list >/dev/null
+
       - name: Terraform Validate & Plan
         working-directory: ${{ env.TF_WORKDIR }}
         run: |

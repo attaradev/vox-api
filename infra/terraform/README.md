@@ -13,7 +13,7 @@ Provisioned components include:
 
 - **Networking:** Dedicated VPC with public, private application, and private data subnets across multiple AZs; internet gateway, NAT gateways, VPC flow logs, and private VPC endpoints for AWS APIs frequently used by the workload.
 - **Compute:** AWS Fargate/ECS cluster with an autoscaled service fronted by an Application Load Balancer. ALB access logs are retained in a locked-down S3 bucket.
-- **Data:** Amazon RDS for PostgreSQL (multi-AZ) and ElastiCache for Redis (encryption enabled). Credentials and auth tokens are rotated automatically and stored securely in AWS Secrets Manager.
+- **Data:** Amazon RDS for PostgreSQL and ElastiCache for Redis (encryption enabled). Defaults favour development labs (`db.t3.micro`, `cache.t4g.micro`, single-AZ) and can be scaled up via variables. Credentials and auth tokens are rotated automatically and stored securely in AWS Secrets Manager.
 - **Storage:** Private S3 buckets for static assets and media uploads with versioning, lifecycle policies, and default encryption.
 - **Container Registry:** Private Amazon ECR repository with scan-on-push, tag immutability, and lifecycle rules for pruning older images.
 - **Secrets & Config:** Dedicated Secrets Manager entries for the Django secret key, database credentials, and Redis connection information, including ready-to-use connection strings that are wired into the ECS task definition by default.
@@ -96,6 +96,37 @@ Each module exposes outputs used by the top-level configuration and can be re-us
    terraform apply
    ```
 
+### Migrating from the legacy VPC module
+
+If you previously applied the old `module.vpc` configuration you may need to remove
+several obsolete resources from the state before the new modules can plan
+successfully:
+
+```bash
+terraform state rm \
+  module.vpc.module.vpc.aws_route.private_nat_gateway[0] \
+  module.vpc.module.vpc.aws_route_table.private[0] \
+  module.vpc.module.vpc.aws_route.public_internet_gateway[0] \
+  module.vpc.module.vpc.aws_subnet.public[0] \
+  module.vpc.module.vpc.aws_subnet.public[1] \
+  module.vpc.module.vpc.aws_route_table.public[0] \
+  module.vpc.module.vpc.aws_subnet.private[0] \
+  module.vpc.module.vpc.aws_subnet.private[1] \
+  aws_security_group.alb \
+  aws_vpc_endpoint.secretsmanager \
+  aws_security_group.endpoints \
+  aws_ssm_parameter.database_url \
+  aws_security_group.ecs_tasks \
+  aws_vpc_endpoint.s3 \
+  aws_vpc_endpoint.cloudwatch \
+  aws_security_group.rds \
+  aws_security_group.redis \
+  'aws_iam_role_policy_attachment.ecs_task_execution["arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess"]' \
+  'aws_iam_role_policy_attachment.ecs_task_execution["arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"]'
+```
+
+The deploy workflow performs the same cleanup automatically before each plan.
+
 After the apply succeeds, use the outputs to configure DNS (ALB details), update application secrets, and connect external services.
 
 ## Important Variables
@@ -105,6 +136,7 @@ After the apply succeeds, use the outputs to configure DNS (ALB details), update
 - `alb_allowed_cidrs` – restrict incoming traffic to the load balancer.
 - `ecs_task_environment` – inject additional environment variables into the running containers.
 - `ecs_task_secrets` – optional overrides for the default database/redis/Django secrets that Terraform provisions automatically (provide unique secret names per entry).
+- `single_nat_gateway` – default `true` to share a single NAT gateway across AZs (lower cost); disable if you require per-AZ redundancy.
 - `db_*` and `redis_*` variables – tune instance shapes, retention, or password overrides.
 - `s3_force_destroy` – defaults to `false` to protect data; set `true` only in ephemeral environments.
 - `ecr_*` variables – adjust tag mutability, scanning, encryption, or lifecycle policy for the container registry.

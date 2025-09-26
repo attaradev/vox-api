@@ -49,6 +49,12 @@ variable "enable_vpc_flow_logs" {
   default     = true
 }
 
+variable "single_nat_gateway" {
+  description = "Use a single NAT gateway shared across availability zones"
+  type        = bool
+  default     = true
+}
+
 variable "flow_logs_retention_in_days" {
   description = "Retention period for VPC flow logs"
   type        = number

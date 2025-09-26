@@ -52,6 +52,12 @@ variable "private_data_subnet_cidrs" {
   default     = []
 }
 
+variable "single_nat_gateway" {
+  description = "Use a single NAT gateway across availability zones to reduce cost"
+  type        = bool
+  default     = true
+}
+
 variable "container_image" {
   description = "Optional full URI to the container image for the API service"
   type        = string
@@ -166,13 +172,13 @@ variable "db_username" {
 variable "db_engine_version" {
   description = "Postgres engine version"
   type        = string
-  default     = "15.4"
+  default     = "17.5"
 }
 
 variable "db_instance_class" {
   description = "Instance class for Postgres"
   type        = string
-  default     = "db.t4g.medium"
+  default     = "db.t3.micro"
 }
 
 variable "db_allocated_storage" {
@@ -184,19 +190,19 @@ variable "db_allocated_storage" {
 variable "db_max_allocated_storage" {
   description = "Maximum autoscaling storage for Postgres"
   type        = number
-  default     = 100
+  default     = 20
 }
 
 variable "db_backup_retention_period" {
   description = "Backup retention in days for Postgres"
   type        = number
-  default     = 7
+  default     = 1
 }
 
 variable "db_multi_az" {
   description = "Provision multi-AZ Postgres standby"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "db_apply_immediately" {
@@ -233,13 +239,13 @@ variable "redis_engine_version" {
 variable "redis_node_type" {
   description = "Redis node instance type"
   type        = string
-  default     = "cache.t3.medium"
+  default     = "cache.t4g.micro"
 }
 
 variable "redis_replicas_per_node_group" {
   description = "Replicas per Redis node group"
   type        = number
-  default     = 1
+  default     = 0
 }
 
 variable "redis_num_node_groups" {

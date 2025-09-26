@@ -1,3 +1,48 @@
+terraform {
+  required_version = ">= 1.4.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.43"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.5"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+
+  default_tags {
+    tags = merge(
+      {
+        Project     = var.project
+        Environment = var.environment
+      },
+      var.additional_tags
+    )
+  }
+}
+
+locals {
+  name_prefix = lower(replace("${var.project}-${var.environment}", "_", "-"))
+  tags = merge(
+    {
+      Project     = var.project
+      Environment = var.environment
+      ManagedBy   = "terraform"
+    },
+    var.additional_tags
+  )
+}
+
+# -----------------------------------------------------------------------------
+# NETWORKING
+# -----------------------------------------------------------------------------
+
 data "aws_availability_zones" "available" {
   state = "available"
 }
@@ -25,11 +70,6 @@ locals {
   public_subnets       = length(var.public_subnet_cidrs) > 0 ? var.public_subnet_cidrs : local.computed_public_subnets
   private_app_subnets  = length(var.private_app_subnet_cidrs) > 0 ? var.private_app_subnet_cidrs : local.computed_private_app_subnets
   private_data_subnets = length(var.private_data_subnet_cidrs) > 0 ? var.private_data_subnet_cidrs : local.computed_private_data_subnets
-
-  ecs_task_role_policy_arns = concat(
-    [aws_iam_policy.app_bucket_access.arn],
-    var.ecs_task_role_policy_arns
-  )
 }
 
 module "network" {
@@ -41,8 +81,13 @@ module "network" {
   public_subnet_cidrs       = local.public_subnets
   private_app_subnet_cidrs  = local.private_app_subnets
   private_data_subnet_cidrs = local.private_data_subnets
+  single_nat_gateway        = var.single_nat_gateway
   tags                      = local.tags
 }
+
+# -----------------------------------------------------------------------------
+# SECURITY GROUPS
+# -----------------------------------------------------------------------------
 
 resource "aws_security_group" "alb" {
   name        = "${local.name_prefix}-alb"
@@ -113,6 +158,10 @@ resource "aws_security_group" "ecs" {
   })
 }
 
+# -----------------------------------------------------------------------------
+# STORAGE
+# -----------------------------------------------------------------------------
+
 module "s3_buckets" {
   source = "./modules/s3_buckets"
 
@@ -150,7 +199,14 @@ resource "aws_iam_policy" "app_bucket_access" {
       },
       {
         Effect = "Allow"
-        Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:GetObjectVersion", "s3:ListMultipartUploadParts", "s3:AbortMultipartUpload"],
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:GetObjectVersion",
+          "s3:ListMultipartUploadParts",
+          "s3:AbortMultipartUpload"
+        ]
         Resource = [
           "arn:aws:s3:::${module.s3_buckets.static_bucket_name}/*",
           "arn:aws:s3:::${module.s3_buckets.media_bucket_name}/*"
@@ -159,6 +215,10 @@ resource "aws_iam_policy" "app_bucket_access" {
     ]
   })
 }
+
+# -----------------------------------------------------------------------------
+# DATA LAYER
+# -----------------------------------------------------------------------------
 
 locals {
   db_allowed_security_groups = concat([aws_security_group.ecs.id], var.db_additional_allowed_security_group_ids)
@@ -202,7 +262,45 @@ module "redis" {
   tags                       = local.tags
 }
 
+# -----------------------------------------------------------------------------
+# SECRETS
+# -----------------------------------------------------------------------------
+
+resource "random_password" "django_secret_key" {
+  length           = 50
+  special          = true
+  override_special = "!@#$%^&*()-_=+[]{}"
+}
+
+resource "aws_secretsmanager_secret" "django" {
+  name        = "${local.name_prefix}-django-settings"
+  description = "Django application secrets for ${local.name_prefix}"
+
+  tags = merge(local.tags, {
+    Name = "${local.name_prefix}-django-settings"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "django" {
+  secret_id = aws_secretsmanager_secret.django.id
+
+  secret_string = jsonencode({
+    DJANGO_SECRET_KEY = random_password.django_secret_key.result
+  })
+}
+
+# -----------------------------------------------------------------------------
+# COMPUTE
+# -----------------------------------------------------------------------------
+
 locals {
+  ecs_task_role_policy_map = merge(
+    {
+      app_bucket_access = aws_iam_policy.app_bucket_access.arn
+    },
+    { for idx, arn in var.ecs_task_role_policy_arns : "extra_${idx}" => arn }
+  )
+
   ecs_task_secret_defaults = {
     DATABASE_URL      = "${module.rds.secret_arn}:database_url::"
     REDIS_URL         = "${module.redis.secret_arn}:redis_url::"
@@ -243,29 +341,6 @@ module "ecs_service" {
   scale_max_capacity        = var.ecs_scale_max_capacity
   scale_cpu_target          = var.ecs_scale_cpu_target
   scale_memory_target       = var.ecs_scale_memory_target
-  task_role_policy_arns     = local.ecs_task_role_policy_arns
+  task_role_policy_arns     = local.ecs_task_role_policy_map
   tags                      = local.tags
-}
-
-resource "random_password" "django_secret_key" {
-  length           = 50
-  special          = true
-  override_special = "!@#$%^&*()-_=+[]{}"
-}
-
-resource "aws_secretsmanager_secret" "django" {
-  name        = "${local.name_prefix}-django-settings"
-  description = "Django application secrets for ${local.name_prefix}"
-
-  tags = merge(local.tags, {
-    Name = "${local.name_prefix}-django-settings"
-  })
-}
-
-resource "aws_secretsmanager_secret_version" "django" {
-  secret_id = aws_secretsmanager_secret.django.id
-
-  secret_string = jsonencode({
-    DJANGO_SECRET_KEY = random_password.django_secret_key.result
-  })
 }

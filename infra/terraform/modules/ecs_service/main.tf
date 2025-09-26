@@ -4,6 +4,10 @@ locals {
   secrets        = [for secret in var.secrets : { name = secret.name, valueFrom = secret.value_from }]
 }
 
+data "aws_elb_service_account" "this" {}
+
+data "aws_caller_identity" "current" {}
+
 resource "aws_ecs_cluster" "this" {
   name = "${var.name_prefix}-cluster"
 
@@ -59,7 +63,7 @@ resource "aws_iam_role" "task" {
 }
 
 resource "aws_iam_role_policy_attachment" "task_additional" {
-  for_each   = toset(var.task_role_policy_arns)
+  for_each   = var.task_role_policy_arns
   role       = aws_iam_role.task.name
   policy_arn = each.value
 }
@@ -84,6 +88,34 @@ resource "aws_s3_bucket_public_access_block" "access_logs" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "access_logs" {
+  bucket = aws_s3_bucket.access_logs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AWSLogDeliveryWrite"
+        Effect = "Allow"
+        Principal = {
+          AWS = data.aws_elb_service_account.this.arn
+        }
+        Action   = "s3:PutObject"
+        Resource = "${aws_s3_bucket.access_logs.arn}/alb/AWSLogs/${data.aws_caller_identity.current.account_id}/*"
+      },
+      {
+        Sid    = "AWSLogDeliveryAclCheck"
+        Effect = "Allow"
+        Principal = {
+          AWS = data.aws_elb_service_account.this.arn
+        }
+        Action   = "s3:GetBucketAcl"
+        Resource = aws_s3_bucket.access_logs.arn
+      }
+    ]
+  })
 }
 
 resource "aws_lb" "this" {
