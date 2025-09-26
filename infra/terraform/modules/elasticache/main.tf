@@ -20,9 +20,7 @@ resource "aws_elasticache_replication_group" "redis" {
   apply_immediately          = true
   snapshot_retention_limit   = 7
   snapshot_window            = "03:00-04:00"
-  tags = {
-    Name        = var.cluster_id
-    Environment = "production"
-    ManagedBy   = "Terraform"
-  }
+  tags = merge(var.tags, {
+    Name = var.cluster_id
+  })
 }

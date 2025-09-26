@@ -10,7 +10,7 @@ output "ecr_repository_url" {
 
 output "ecs_cluster_id" {
   description = "ECS cluster ID"
-  value       = aws_ecs_cluster.app.id
+  value       = module.ecs.ecs_cluster_id
 }
 
 output "ecs_service_name" {

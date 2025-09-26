@@ -27,3 +27,9 @@ variable "alb_logs_bucket" {
   description = "S3 bucket for ALB access logs"
   type        = string
 }
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}

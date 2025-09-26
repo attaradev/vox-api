@@ -17,24 +17,19 @@ This infrastructure uses Terraform to provision secure, production-ready AWS res
 
 ## Remote State Backend Setup
 
-This project uses an S3 backend for Terraform state and DynamoDB for state locking. **You must create these resources before running `terraform init`:**
+This project uses an S3 backend for Terraform state with the built-in `.tflock` lock file. **You must create the state bucket before running `terraform init`:**
 
 - S3 bucket: `vox-api-terraform-state` (in `us-east-1`)
-- DynamoDB table: `vox-api-terraform-lock` (with primary key `LockID`)
 
-Example AWS CLI commands:
+Example AWS CLI command:
 
 ```sh
 aws s3api create-bucket --bucket vox-api-terraform-state --region us-east-1
-aws dynamodb create-table \
-  --table-name vox-api-terraform-lock \
-  --attribute-definitions AttributeName=LockID,AttributeType=S \
-  --key-schema AttributeName=LockID,KeyType=HASH \
-  --billing-mode PAY_PER_REQUEST \
-  --region us-east-1
 ```
 
-If you see `NoSuchBucket` or backend errors on `terraform init`, ensure the bucket and table exist and retry after a minute.
+Enable bucket versioning (and optional object-lock) for stronger state protection.
+
+If you see `NoSuchBucket` or backend errors on `terraform init`, ensure the bucket exists and retry after a minute.
 
 ## Environment Variables
 
@@ -42,6 +37,8 @@ If you see `NoSuchBucket` or backend errors on `terraform init`, ensure the buck
 - `VPC_CIDR`: CIDR block for the VPC
 - `DB_USERNAME`, `DB_PASSWORD`, `DB_NAME`: RDS database credentials
 - `S3_BUCKET_NAME`: S3 bucket for media/static files
+- `ENVIRONMENT`: Deployment environment used for tagging (maps to `var.environment`)
+- `TF_VAR_additional_tags`: Additional tags merged into every resource
 - See each module README for additional variables
 
 ## Module Usage
@@ -63,10 +60,13 @@ Each module is documented in its own README with required inputs, outputs, and e
 
 1. Install Terraform and AWS CLI.
 2. Configure your AWS credentials.
-3. **Create the S3 bucket and DynamoDB table for remote state (see above).**
+3. **Create the S3 bucket for remote state (see above).**
 4. Run `terraform init` to initialize modules.
 5. Run `terraform plan` to review changes.
 6. Run `terraform apply` to provision infrastructure.
+
+> **Tip:** When working offline or without AWS credentials, set `TF_VAR_skip_aws_account_checks=true` to bypass provider validation during `terraform init`.
+> Provide `TF_VAR_environment` (for example `staging`) to propagate environment-aware naming and tagging.
 
 ## Maintenance
 

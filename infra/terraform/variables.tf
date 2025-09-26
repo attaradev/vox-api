@@ -4,6 +4,24 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "environment" {
+  description = "Deployment environment (e.g., dev, staging, prod)"
+  type        = string
+  default     = "production"
+}
+
+variable "skip_aws_account_checks" {
+  description = "Skip AWS account validation checks (useful for local/offline workflows)"
+  type        = bool
+  default     = false
+}
+
+variable "additional_tags" {
+  description = "Additional tags to merge into all tagged resources"
+  type        = map(string)
+  default     = {}
+}
+
 variable "vpc_name" {
   description = "Name of the VPC"
   type        = string
@@ -243,4 +261,20 @@ variable "ecs_task_execution_policy_arns" {
     "arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess",
     "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
   ]
+}
+
+variable "default_capacity_provider_strategy" {
+  description = "Capacity provider strategy for ECS cluster"
+  type = map(object({
+    base   = optional(number)
+    name   = optional(string)
+    weight = optional(number)
+  }))
+  default = null
+}
+
+variable "db_family" {
+  description = "The family of the DB parameter group"
+  type        = string
+  default     = "postgres15"
 }

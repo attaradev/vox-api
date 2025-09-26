@@ -34,3 +34,9 @@ variable "vpc_flow_log_role_arn" {
   type        = string
   default     = ""
 }
+
+variable "tags" {
+  description = "Tags to apply to VPC resources"
+  type        = map(string)
+  default     = {}
+}

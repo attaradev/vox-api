@@ -8,3 +8,9 @@ variable "kms_key_id" {
   type        = string
   default     = ""
 }
+
+variable "tags" {
+  description = "Tags to apply to the CloudWatch log group"
+  type        = map(string)
+  default     = {}
+}

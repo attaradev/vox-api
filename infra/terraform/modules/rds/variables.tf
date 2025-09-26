@@ -32,3 +32,15 @@ variable "subnet_ids" {
   description = "Subnet IDs for RDS"
   type        = list(string)
 }
+
+variable "family" {
+  description = "The family of the DB parameter group"
+  type        = string
+  default     = "postgres15"
+}
+
+variable "tags" {
+  description = "Tags to apply to RDS resources"
+  type        = map(string)
+  default     = {}
+}

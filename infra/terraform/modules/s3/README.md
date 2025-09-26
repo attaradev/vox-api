@@ -7,6 +7,7 @@ Provisions a single AWS S3 bucket. To create multiple buckets, instantiate this 
 ## Inputs
 
 - `s3_bucket_name`: Name of the S3 bucket
+- `tags`: Tags to apply to the S3 bucket
 
 ## Outputs
 
@@ -21,11 +22,20 @@ Provisions a single AWS S3 bucket. To create multiple buckets, instantiate this 
 module "s3_media" {
   source         = "./modules/s3"
   s3_bucket_name = "vox-api-media"
+  tags = {
+    Environment = "production"
+    ManagedBy   = "Terraform"
+  }
 }
 
 module "s3_logs" {
   source         = "./modules/s3"
   s3_bucket_name = "vox-api-logs"
+  tags = {
+    Environment = "production"
+    ManagedBy   = "Terraform"
+    Purpose     = "alb-access-logs"
+  }
 }
 ```
 

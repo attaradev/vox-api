@@ -15,4 +15,6 @@ module "rds" {
   backup_retention_period = 7
   multi_az                = true
   publicly_accessible     = false
+  family                  = var.family
+  tags                    = var.tags
 }

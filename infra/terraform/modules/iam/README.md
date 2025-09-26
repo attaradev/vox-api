@@ -8,6 +8,7 @@ Provisions a single AWS IAM role for ECS task execution. To create multiple role
 
 - `role_name`: Name of the IAM role
 - `inline_policy_json`: Inline policy JSON for the role
+- `tags`: Tags to apply to the IAM role
 
 ## Outputs
 
@@ -21,12 +22,20 @@ module "ecs_task_role_1" {
   source            = "./modules/iam"
   role_name         = "ecs-task-execution-role-1"
   inline_policy_json = data.aws_iam_policy_document.task_policy_1.json
+  tags = {
+    Environment = "production"
+    ManagedBy   = "Terraform"
+  }
 }
 
 module "ecs_task_role_2" {
   source            = "./modules/iam"
   role_name         = "ecs-task-execution-role-2"
   inline_policy_json = data.aws_iam_policy_document.task_policy_2.json
+  tags = {
+    Environment = "staging"
+    ManagedBy   = "Terraform"
+  }
 }
 ```
 

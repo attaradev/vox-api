@@ -10,11 +10,9 @@ resource "aws_lb" "app" {
     enabled = true
   }
 
-  tags = {
-    Name        = var.alb_name
-    Environment = "production"
-    ManagedBy   = "Terraform"
-  }
+  tags = merge(var.tags, {
+    Name = var.alb_name
+  })
 }
 
 resource "aws_lb_target_group" "app" {
@@ -32,4 +30,8 @@ resource "aws_lb_target_group" "app" {
     healthy_threshold   = 2
     unhealthy_threshold = 2
   }
+
+  tags = merge(var.tags, {
+    Name = var.target_group_name
+  })
 }

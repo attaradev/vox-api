@@ -29,3 +29,9 @@ variable "security_group_ids" {
   description = "List of security group IDs for Redis"
   type        = list(string)
 }
+
+variable "tags" {
+  description = "Tags to apply to ElastiCache resources"
+  type        = map(string)
+  default     = {}
+}

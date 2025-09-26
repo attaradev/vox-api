@@ -11,5 +11,11 @@ variable "secret_string" {
 variable "secret_access_policy_json" {
   description = "JSON policy for restricting access to the secret"
   type        = string
-  default     = "{}"
+  default     = ""
+}
+
+variable "tags" {
+  description = "Tags to apply to the secret"
+  type        = map(string)
+  default     = {}
 }
