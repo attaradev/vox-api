@@ -54,6 +54,24 @@ resource "aws_iam_role_policy_attachment" "execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+resource "aws_iam_role_policy" "execution_secrets" {
+  name = "${var.name_prefix}-ecs-execution-secrets"
+  role = aws_iam_role.execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = var.secrets_arns
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role" "task" {
   name = "${var.name_prefix}-ecs-task"
 

@@ -132,8 +132,8 @@ variable "task_role_policy_arns" {
   default     = {}
 }
 
-variable "tags" {
-  description = "Tags to propagate to ECS resources"
-  type        = map(string)
-  default     = {}
+variable "secrets_arns" {
+  description = "List of Secrets Manager ARNs that the ECS execution role needs access to"
+  type        = list(string)
+  default     = []
 }

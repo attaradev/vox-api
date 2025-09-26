@@ -417,6 +417,7 @@ module "ecs_service" {
   scale_cpu_target          = var.ecs_scale_cpu_target
   scale_memory_target       = var.ecs_scale_memory_target
   task_role_policy_arns     = local.ecs_task_role_policy_map
+  secrets_arns              = [module.rds.secret_arn, module.redis.secret_arn, aws_secretsmanager_secret.django.arn]
   tags                      = local.tags
 }
 
