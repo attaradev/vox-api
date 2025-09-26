@@ -133,12 +133,8 @@ module "network" {
 # SECURITY GROUPS
 # -----------------------------------------------------------------------------
 
-resource "random_id" "alb_sg_suffix" {
-  byte_length = 4
-}
-
 resource "aws_security_group" "alb" {
-  name        = "${local.name_prefix}-alb-${random_id.alb_sg_suffix.hex}"
+  name        = "${local.name_prefix}-alb-${substr(sha256(module.network.vpc_id), 0, 8)}"
   description = "Allow inbound web traffic"
   vpc_id      = module.network.vpc_id
 
@@ -315,9 +311,10 @@ module "redis" {
 # -----------------------------------------------------------------------------
 
 resource "aws_ssm_parameter" "database_url" {
-  name  = "/${local.name_prefix}/database_url"
-  type  = "SecureString"
-  value = module.rds.secret_arn
+  name      = "/${local.name_prefix}/database_url"
+  type      = "SecureString"
+  value     = module.rds.secret_arn
+  overwrite = true
 
   tags = local.tags
 }
