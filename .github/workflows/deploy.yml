@@ -31,7 +31,7 @@ jobs:
       tf_backend_key: ${{ steps.setup.outputs.tf_backend_key }}
     steps:
       - name: AWS Setup
-        uses: .github/actions/aws-setup
+        uses: ./.github/actions/aws-setup
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
@@ -74,13 +74,13 @@ jobs:
     permissions: { id-token: write, contents: read }
     steps:
       - name: AWS Setup
-        uses: .github/actions/aws-setup
+        uses: ./.github/actions/aws-setup
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
 
       - name: Terraform Setup
-        uses: .github/actions/terraform-setup
+        uses: ./.github/actions/terraform-setup
         with:
           working-directory: ${{ env.TF_WORKDIR }}
           state-bucket: ${{ env.TF_STATE_BUCKET }}
