@@ -199,8 +199,6 @@ jobs:
     needs: [terraform_infra]
     if: needs.terraform_infra.outputs.apply_requested == 'true'
     permissions: { id-token: write, contents: read }
-    outputs:
-      image: ${{ steps.build_push.outputs.image }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
@@ -244,13 +242,13 @@ jobs:
           echo "Building and pushing image: $IMAGE" >&2
           docker build --pull --tag "$IMAGE" .
           docker push "$IMAGE"
-          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          # Note: Not outputting image URL to avoid sensitive data masking
 
   deploy_ecs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
-    needs: [terraform_infra, build_and_push_image]
-    if: needs.terraform_infra.outputs.apply_requested == 'true' && needs.build_and_push_image.result == 'success'
+    needs: [terraform_infra]
+    if: needs.terraform_infra.outputs.apply_requested == 'true'
     environment: ${{ github.event.inputs.environment || 'production' }}
     permissions: { id-token: write, contents: read }
     steps:
@@ -269,6 +267,20 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y jq
+
+      - name: Get deployment image URL
+        id: deployment_image
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGION="$AWS_REGION"
+          ECR_REPO_URL="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/vox-api-production-api"
+          IMAGE="${ECR_REPO_URL}:${IMAGE_TAG}"
+          echo "Deployment image: $IMAGE" >&2
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
       - name: Register task definitions
         id: register_td
@@ -305,7 +317,7 @@ jobs:
             echo "${service_name}_task_definition_arn=$NEW_TD_ARN" >> "$GITHUB_OUTPUT"
           }
 
-          NEW_IMAGE="${{ needs.build_and_push_image.outputs.image }}"
+          NEW_IMAGE="${{ steps.deployment_image.outputs.image }}"
           register_task_definition "${{ needs.terraform_infra.outputs.ecs_task_family }}" "api" "td-api" "$NEW_IMAGE"
           register_task_definition "${{ needs.terraform_infra.outputs.celery_task_family }}" "celery" "td-celery" "$NEW_IMAGE"
 
