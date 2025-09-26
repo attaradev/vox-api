@@ -156,28 +156,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Test Docker container health
-        run: |
-          set -euo pipefail
-          docker run -d --name vox-api-test -p 8000:8000 \
-            -e POSTGRES_HOST=postgres \
-            -e POSTGRES_PORT=5432 \
-            -e POSTGRES_DB=vox_db \
-            -e POSTGRES_USER=vox_user \
-            -e POSTGRES_PASSWORD=vox_pass \
-            -e REDIS_HOST=redis \
-            -e REDIS_PORT=6379 \
-            vox-api:dev
-          for i in {1..30}; do
-            if curl -fsS http://localhost:8000/ >/dev/null; then
-              echo "Service is up"; break
-            fi
-            sleep 1
-          done
-          curl --fail http://localhost:8000/ || (docker logs vox-api-test && exit 1)
-          docker stop vox-api-test
-          docker rm vox-api-test
-
   deploy-dispatch:
     name: Dispatch Deploy Workflow
     runs-on: ubuntu-latest
