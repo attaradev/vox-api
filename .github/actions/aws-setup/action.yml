@@ -1,5 +1,5 @@
 name: "AWS Setup"
-description: "Configure AWS credentials and checkout code"
+description: "Configure AWS credentials"
 
 inputs:
   aws-region:
@@ -12,12 +12,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
-        persist-credentials: false
-
     - name: Configure AWS (OIDC)
       uses: aws-actions/configure-aws-credentials@v4
       with:

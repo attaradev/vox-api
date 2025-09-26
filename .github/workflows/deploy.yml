@@ -30,6 +30,9 @@ jobs:
     outputs:
       tf_backend_key: ${{ steps.setup.outputs.tf_backend_key }}
     steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1, persist-credentials: false }
+
       - name: AWS Setup
         uses: ./.github/actions/aws-setup
         with:
@@ -73,6 +76,9 @@ jobs:
     needs: [setup]
     permissions: { id-token: write, contents: read }
     steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1, persist-credentials: false }
+
       - name: AWS Setup
         uses: ./.github/actions/aws-setup
         with:
