@@ -118,8 +118,9 @@ jobs:
           echo "Constructing ECR repository URL..." >&2
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           REGION="${{ env.AWS_REGION }}"
+          DEPLOY_ENV="${{ env.DEPLOY_ENV }}"
           # ECR repository name follows the pattern: vox-api-{environment}-api
-          ENV_PART=$(echo "${{ env.DEPLOY_ENV }}" | tr '_' '-')
+          ENV_PART=$(echo "$DEPLOY_ENV" | tr '_' '-')
           REPO_NAME="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/vox-api-${ENV_PART}-api"
           echo "Constructed ECR repository URL: $REPO_NAME" >&2
           echo "ecr_repository_url=$REPO_NAME" >> "$GITHUB_OUTPUT"
