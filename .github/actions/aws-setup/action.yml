@@ -1,5 +1,5 @@
 name: "AWS Setup"
-description: "Configure AWS credentials"
+description: "Configure AWS credentials (OIDC)"
 
 inputs:
   aws-region:
