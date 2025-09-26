@@ -307,7 +307,7 @@ jobs:
   deploy_ecs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
-    needs: [terraform_apply]
+    needs: [terraform_plan, terraform_apply]
     if: needs.terraform_apply.outputs.apply_requested == 'true'
     environment: ${{ github.event.inputs.environment || 'production' }}
     permissions: { id-token: write, contents: read }
@@ -334,7 +334,7 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
-          ECR_REPO_URL="${{ needs.terraform_apply.outputs.ecr_repository_url }}"
+          ECR_REPO_URL="${{ needs.terraform_plan.outputs.ecr_repository_url }}"
           if [ -z "$ECR_REPO_URL" ]; then
             echo "Error: ECR repository URL not available from terraform outputs" >&2
             exit 1
