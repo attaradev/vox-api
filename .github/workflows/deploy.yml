@@ -75,8 +75,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [setup]
     permissions: { id-token: write, contents: read }
-    outputs:
-      ecr_repository_url: ${{ steps.extract_ecr_url.outputs.ecr_repository_url || '' }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
@@ -109,21 +107,6 @@ jobs:
           terraform fmt -check
           terraform validate
           terraform plan -out=tfplan -input=false -no-color
-
-      - name: Extract ECR Repository URL
-        id: extract_ecr_url
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: |
-          set -euo pipefail
-          echo "Constructing ECR repository URL..." >&2
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          REGION="${{ env.AWS_REGION }}"
-          DEPLOY_ENV="${{ env.DEPLOY_ENV }}"
-          # ECR repository name follows the pattern: vox-api-{environment}-api
-          ENV_PART=$(echo "$DEPLOY_ENV" | tr '_' '-')
-          REPO_NAME="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/vox-api-${ENV_PART}-api"
-          echo "Constructed ECR repository URL: $REPO_NAME" >&2
-          echo "ecr_repository_url=$REPO_NAME" >> "$GITHUB_OUTPUT"
 
   terraform_apply:
     name: Terraform Apply
@@ -277,12 +260,14 @@ jobs:
         id: ecr_url
         run: |
           set -euo pipefail
-          ECR_REPO_URL="${{ needs.terraform_plan.outputs.ecr_repository_url }}"
-          if [ -z "$ECR_REPO_URL" ]; then
-            echo "Error: ECR repository URL not available from terraform outputs" >&2
-            exit 1
-          fi
-          echo "Using ECR repository URL from terraform: $ECR_REPO_URL" >&2
+          echo "Constructing ECR repository URL..." >&2
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGION="${{ env.AWS_REGION }}"
+          DEPLOY_ENV="${{ env.DEPLOY_ENV }}"
+          # ECR repository name follows the pattern: vox-api-{environment}-api
+          ENV_PART=$(echo "$DEPLOY_ENV" | tr '_' '-')
+          ECR_REPO_URL="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/vox-api-${ENV_PART}-api"
+          echo "Using ECR repository URL: $ECR_REPO_URL" >&2
           echo "ecr_repo_url=${ECR_REPO_URL}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to ECR
@@ -335,11 +320,13 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
-          ECR_REPO_URL="${{ needs.terraform_plan.outputs.ecr_repository_url }}"
-          if [ -z "$ECR_REPO_URL" ]; then
-            echo "Error: ECR repository URL not available from terraform outputs" >&2
-            exit 1
-          fi
+          echo "Constructing ECR repository URL..." >&2
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGION="${{ env.AWS_REGION }}"
+          DEPLOY_ENV="${{ env.DEPLOY_ENV }}"
+          # ECR repository name follows the pattern: vox-api-{environment}-api
+          ENV_PART=$(echo "$DEPLOY_ENV" | tr '_' '-')
+          ECR_REPO_URL="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/vox-api-${ENV_PART}-api"
           IMAGE="${ECR_REPO_URL}:${IMAGE_TAG}"
           echo "Deployment image: $IMAGE" >&2
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
