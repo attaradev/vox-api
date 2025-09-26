@@ -120,6 +120,7 @@ jobs:
       ecs_task_family: ${{ steps.outputs_step.outputs.ecs_task_family || '' }}
       celery_service_name: ${{ steps.outputs_step.outputs.celery_service_name || '' }}
       celery_task_family: ${{ steps.outputs_step.outputs.celery_task_family || '' }}
+      ecr_repository_url: ${{ steps.outputs_step.outputs.ecr_repository_url || '' }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
@@ -223,6 +224,7 @@ jobs:
           extract_output ecs_task_family
           extract_output celery_service_name
           extract_output celery_task_family
+          extract_output ecr_repository_url
 
       - name: Show non-sensitive outputs
         if: steps.apply_mode.outputs.auto_apply == 'true'
@@ -258,11 +260,13 @@ jobs:
         id: ecr_url
         run: |
           set -euo pipefail
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          REGION=${{ env.AWS_REGION }}
-          REPO_NAME="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/vox-api-production-api"
-          echo "Constructed ECR repository URL: $REPO_NAME" >&2
-          echo "ecr_repo_url=${REPO_NAME}" >> "$GITHUB_OUTPUT"
+          ECR_REPO_URL="${{ needs.terraform_apply.outputs.ecr_repository_url }}"
+          if [ -z "$ECR_REPO_URL" ]; then
+            echo "Error: ECR repository URL not available from terraform outputs" >&2
+            exit 1
+          fi
+          echo "Using ECR repository URL from terraform: $ECR_REPO_URL" >&2
+          echo "ecr_repo_url=${ECR_REPO_URL}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to ECR
         uses: aws-actions/amazon-ecr-login@v2
@@ -311,13 +315,14 @@ jobs:
       - name: Get deployment image URL
         id: deployment_image
         env:
-          AWS_REGION: ${{ env.AWS_REGION }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          REGION="$AWS_REGION"
-          ECR_REPO_URL="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/vox-api-production-api"
+          ECR_REPO_URL="${{ needs.terraform_apply.outputs.ecr_repository_url }}"
+          if [ -z "$ECR_REPO_URL" ]; then
+            echo "Error: ECR repository URL not available from terraform outputs" >&2
+            exit 1
+          fi
           IMAGE="${ECR_REPO_URL}:${IMAGE_TAG}"
           echo "Deployment image: $IMAGE" >&2
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
