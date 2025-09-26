@@ -10,11 +10,11 @@ concurrency:
 env:
   AWS_REGION: us-east-1
   TF_WORKDIR: infra/terraform
-  TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET_NAME }}
-  TF_STATE_DDB_TABLE: ${{ secrets.TF_STATE_DDB_TABLE_NAME }}
-  ECS_CLUSTER: ${{ secrets.ECS_CLUSTER_NAME }}
-  ECS_SERVICE: ${{ secrets.ECS_SERVICE_NAME }}
-  ECS_TASK_FAMILY: ${{ secrets.ECS_TASK_FAMILY_NAME }}
+  TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+  TF_STATE_DDB_TABLE: ${{ secrets.TF_STATE_DDB_TABLE }}
+  ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+  ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+  ECS_TASK_FAMILY: ${{ secrets.ECS_TASK_FAMILY }}
 
 jobs:
   bootstrap_state:
