@@ -54,6 +54,76 @@ def test_create_poll_and_manage_choices():
 
 
 @pytest.mark.django_db
+def test_choice_custom_fields():
+    """Test that choices can have custom fields like name and image."""
+    tier = AccountTier.objects.create(name="Growth", max_members=5, max_polls=5)
+    account = Account.objects.create(
+        name="Custom Fields Org",
+        tier=tier,
+        status="approved",
+        subscription_status="active",
+    )
+    user = get_user_model().objects.create_user(username="creator", password="pw")
+    AccountUserRole.objects.create(account=account, user=user, role="owner")
+
+    client = APIClient()
+    client.force_authenticate(user)
+
+    # Create poll and question
+    response = client.post(
+        "/api/polls/",
+        {
+            "account": account.id,
+            "title": "Candidate Poll",
+            "description": "Vote for candidates",
+        },
+        format="json",
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    poll_id = response.json()["id"]
+
+    question_response = client.post(
+        f"/api/polls/{poll_id}/questions/",
+        {"text": "Who should be president?"},
+        format="json",
+    )
+    assert question_response.status_code == status.HTTP_201_CREATED
+    question_id = question_response.json()["id"]
+
+    # Create choice with custom fields
+    choice_data = {
+        "text": "Candidate A",
+        "custom_fields": {
+            "name": "John Doe",
+            "image": "https://example.com/john.jpg",
+            "party": "Independent",
+            "age": 45,
+        },
+    }
+    choice_response = client.post(
+        f"/api/polls/{poll_id}/questions/{question_id}/choices/",
+        choice_data,
+        format="json",
+    )
+    assert choice_response.status_code == status.HTTP_201_CREATED
+    choice_data_response = choice_response.json()
+    assert choice_data_response["text"] == "Candidate A"
+    assert choice_data_response["custom_fields"]["name"] == "John Doe"
+    assert (
+        choice_data_response["custom_fields"]["image"] == "https://example.com/john.jpg"
+    )
+    assert choice_data_response["custom_fields"]["party"] == "Independent"
+    assert choice_data_response["custom_fields"]["age"] == 45
+
+    # Test retrieving the choice
+    list_response = client.get(f"/api/polls/{poll_id}/questions/{question_id}/choices/")
+    assert list_response.status_code == status.HTTP_200_OK
+    choices = list_response.json()
+    assert len(choices) == 1
+    assert choices[0]["custom_fields"] == choice_data["custom_fields"]
+
+
+@pytest.mark.django_db
 def test_vote_flow_requires_auth_and_respects_uniqueness():
     account = Account.objects.create(
         name="Vote Org", status="approved", subscription_status="active"

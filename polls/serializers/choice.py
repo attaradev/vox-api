@@ -20,6 +20,7 @@ class ChoiceSerializer(serializers.ModelSerializer):
             "poll",
             "question",
             "text",
+            "custom_fields",
             "order",
             "created_at",
             "vote_count",
@@ -39,7 +40,7 @@ class ChoiceCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Choice
-        fields = ["text", "order"]
+        fields = ["text", "custom_fields", "order"]
 
     def create(self, validated_data):
         question = self.context["question"]

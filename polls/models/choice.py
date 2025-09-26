@@ -22,6 +22,7 @@ class Choice(models.Model):
         on_delete=models.CASCADE,
     )
     text = models.CharField(max_length=255)
+    custom_fields = models.JSONField(default=dict, blank=True)
     order = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
