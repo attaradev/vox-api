@@ -1,9 +1,9 @@
 """Views for managing subscription resources and provider flows."""
 
-from rest_framework import generics, permissions, status
+from rest_framework import generics, permissions, serializers, status
+from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from billing.models import BillingAccount
 from billing.models.subscription import Subscription
@@ -77,14 +77,14 @@ class SubscriptionDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance.delete()
 
 
-class SubscriptionStatusView(APIView):
+class SubscriptionStatusView(GenericAPIView):
     """Return subscription status details for the requesting account."""
 
     permission_classes = [IsAuthenticated]
+    serializer_class = serializers.Serializer  # No input, just output
 
     def get(self, request, account_id):
         """Fetch subscription status for a given account or return a 404."""
-
         try:
             billing = BillingAccount.objects.get(account_id=account_id)
             return Response(
@@ -100,25 +100,24 @@ class SubscriptionStatusView(APIView):
             )
 
 
-class CreateSubscriptionView(APIView):
+class CreateSubscriptionView(GenericAPIView):
     """Create a new subscription using the configured billing provider."""
 
     permission_classes = [IsAuthenticated]
+    serializer_class = serializers.Serializer
 
     def post(self, request, account_id):
-        """Create a subscription through Stripe or PayPal based on account data."""
-
+        """
+        Create a subscription through Stripe or PayPal based on account data."""
         price_id = request.data.get("price_id")
         try:
             billing = BillingAccount.objects.get(account_id=account_id)
-            # Example: select provider based on billing info
             provider_name = getattr(billing, "provider", "stripe")
             if provider_name == "paypal":
                 provider = PayPalProvider()
                 subscription = provider.create_subscription(billing.billing_email)
             else:
                 provider = StripeProvider()
-                # You may need to create a Stripe customer first, then subscription
                 customer = provider.create_customer(billing.billing_email)
                 subscription_obj = provider.create_subscription(customer.id, price_id)
                 subscription = subscription_obj

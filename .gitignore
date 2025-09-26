@@ -45,3 +45,41 @@ htmlcov/
 nosetests.xml
 coverage.xml
 *.cover
+
+# Migrations
+vox_api/**/migrations/
+vox_api/**/migrations/*.py
+vox_api/**/migrations/*.pyc
+
+# Config and secrets
+.env*
+secrets.*
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/.terraform.lock.hcl
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/*.tfplan
+infra/terraform/terraform.tfvars
+infra/terraform/variables.tf
+infra/terraform/main.tf.backup
+infra/terraform/modules/**/.terraform/
+infra/terraform/modules/**/.terraform.lock.hcl
+infra/terraform/modules/**/terraform.tfstate*
+infra/terraform/modules/**/terraform.tfvars
+infra/terraform/modules/**/main.tf.backup
+infra/terraform/modules/**/.DS_Store
+infra/terraform/modules/**/.idea/
+infra/terraform/modules/**/.vscode/
+
+# Ignore infra logs and temp files
+infra/**/*.log
+infra/**/*.tmp
+infra/**/*.bak
+infra/**/*.swp
+infra/**/*.swo
+
+# Ignore infra documentation build outputs
+infra/**/build/
+infra/**/dist/

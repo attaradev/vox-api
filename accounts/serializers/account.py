@@ -2,6 +2,7 @@
 Serializers for account resources.
 """
 
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from accounts.models.account import Account
@@ -44,15 +45,18 @@ class AccountSerializer(serializers.ModelSerializer):
             "poll_limit_remaining",
         ]
 
-    def get_tier_features(self, obj):
+    @extend_schema_field(serializers.ListField(child=serializers.CharField()))
+    def get_tier_features(self, obj) -> list[str]:
         """Return tier features for the account."""
         return obj.tier_features()
 
-    def get_member_count(self, obj):
+    @extend_schema_field(serializers.IntegerField())
+    def get_member_count(self, obj) -> int:
         """Return the number of members in the account."""
         return obj.user_roles.count()
 
-    def get_poll_limit_remaining(self, obj):
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
+    def get_poll_limit_remaining(self, obj) -> int | None:
         """Return the remaining poll limit for the account tier."""
         if not obj.tier:
             return None

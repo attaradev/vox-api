@@ -9,11 +9,13 @@
 - Subscription billing powered by dj-stripe with webhook handlers and usage tracking
 - Celery + Redis workers for async jobs (email, notifications, heavy tasks) and Flower monitoring
 - Sentry-ready error hooks, health checks, and Docker-first tooling for dependable deployments
+- **Modular Terraform infrastructure for AWS cloud deployment**
 
 ## Prerequisites
 
 - Docker and the Docker Compose plugin (recommended workflow)
 - Optional: Python 3.12+ and Redis/Postgres if you prefer to run services without Docker
+- **Terraform 1.0+ and AWS CLI for cloud infrastructure**
 
 ## Quick Start (Docker)
 
@@ -64,6 +66,42 @@ docker compose up -d celery flower
 - Stop and remove containers: `docker compose down`
 - Tail service logs: `docker compose logs -f api`
 - Run a management command: `docker compose exec api python manage.py migrate`
+
+## Cloud Infrastructure (Terraform)
+
+This project ships with modular Terraform code for secure AWS deployment. See `infra/terraform/README.md` for full instructions.
+
+**Remote state backend:**
+
+- S3 bucket: `vox-api-terraform-state` (must be created before `terraform init`)
+- DynamoDB table: `vox-api-terraform-lock` (for state locking)
+
+**Provisioned resources:**
+
+- VPC, subnets, NAT gateway, endpoints, flow logs
+- ECS cluster, security groups, IAM roles
+- RDS (Postgres), ElastiCache (Redis)
+- S3 buckets for media/static and logs
+- ALB (Application Load Balancer)
+- CloudWatch log groups
+- Secrets Manager for credentials
+
+**Outputs for domain setup:**
+
+- The ALB module outputs `alb_ip_addresses` and `alb_dns_name` for DNS and domain configuration. Example:
+
+  ```sh
+  terraform output alb_ip_addresses
+  terraform output alb_dns_name
+  ```
+
+  Use these values to set up your custom domain or CNAME records.
+
+**Onboarding steps:**
+
+1. Create the S3 bucket and DynamoDB table for state backend (see infra README).
+2. Run `terraform init`, `terraform plan`, and `terraform apply` in `infra/terraform`.
+3. Use the outputs to configure your DNS/domain and connect your app to cloud resources.
 
 ## Local Development Without Docker
 

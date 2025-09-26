@@ -2,6 +2,8 @@
 import os
 from pathlib import Path
 
+from vox_api.aws_secrets import get_aws_secret
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -97,10 +99,26 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-change-me")
-
-# For production, use a secrets manager (e.g., AWS Secrets Manager, Vault)
+if os.environ.get("DJANGO_ENV") == "production":
+    # Load secrets from AWS Secrets Manager
+    secret_config = get_aws_secret(
+        os.environ.get("DJANGO_AWS_SECRET_NAME", "vox-api-config")
+    )
+    SECRET_KEY = secret_config.get("DJANGO_SECRET_KEY")
+    POSTGRES_DB = secret_config.get("POSTGRES_DB")
+    POSTGRES_USER = secret_config.get("POSTGRES_USER")
+    POSTGRES_PASSWORD = secret_config.get("POSTGRES_PASSWORD")
+    POSTGRES_HOST = secret_config.get("POSTGRES_HOST", "db")
+    POSTGRES_PORT = secret_config.get("POSTGRES_PORT", "5432")
+    AWS_STORAGE_BUCKET_NAME = secret_config.get("AWS_STORAGE_BUCKET_NAME", "")
+    AWS_ACCESS_KEY_ID = secret_config.get("AWS_ACCESS_KEY_ID", "")
+    AWS_SECRET_ACCESS_KEY = secret_config.get("AWS_SECRET_ACCESS_KEY", "")
+    AWS_S3_REGION_NAME = secret_config.get("AWS_S3_REGION_NAME", "us-east-1")
+    STRIPE_SECRET_KEY = secret_config.get(
+        "STRIPE_SECRET_KEY", "sk_test_your_default_key"
+    )
+else:
+    SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-change-me")
 
 # Set DEBUG based on DJANGO_ENV
 DJANGO_ENV = os.environ.get("DJANGO_ENV", "development")
@@ -162,24 +180,36 @@ WSGI_APPLICATION = "vox_api.wsgi.application"
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
 
-if os.environ.get("POSTGRES_DB"):
+if os.environ.get("DJANGO_ENV") == "production":
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ.get("POSTGRES_DB"),
-            "USER": os.environ.get("POSTGRES_USER"),
-            "PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
-            "HOST": os.environ.get("POSTGRES_HOST", "db"),
-            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+            "NAME": POSTGRES_DB,
+            "USER": POSTGRES_USER,
+            "PASSWORD": POSTGRES_PASSWORD,
+            "HOST": POSTGRES_HOST,
+            "PORT": POSTGRES_PORT,
         }
     }
 else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": str(BASE_DIR / "db.sqlite3"),
+    if os.environ.get("POSTGRES_DB"):
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": os.environ.get("POSTGRES_DB"),
+                "USER": os.environ.get("POSTGRES_USER"),
+                "PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
+                "HOST": os.environ.get("POSTGRES_HOST", "db"),
+                "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+            }
         }
-    }
+    else:
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.sqlite3",
+                "NAME": str(BASE_DIR / "db.sqlite3"),
+            }
+        }
 
 
 # Password validation
@@ -224,12 +254,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# Use S3 for static/media in production
-if not DEBUG:
-    AWS_STORAGE_BUCKET_NAME = os.environ.get("AWS_STORAGE_BUCKET_NAME", "")
-    AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "")
-    AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
-    AWS_S3_REGION_NAME = os.environ.get("AWS_S3_REGION_NAME", "us-east-1")
+if os.environ.get("DJANGO_ENV") == "production":
     AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
     STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/static/"
     MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/media/"
@@ -263,4 +288,5 @@ SPECTACULAR_SETTINGS = {
 # Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "sk_test_your_default_key")
+if os.environ.get("DJANGO_ENV") != "production":
+    STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "sk_test_your_default_key")

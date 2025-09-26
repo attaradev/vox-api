@@ -13,8 +13,8 @@ class StripeWebhookView(APIView):
 
     authentication_classes = []
     permission_classes = []
+    serializer_class = None
 
     def post(self, request, *args, **kwargs):
         """Process incoming webhook notifications from Stripe."""
-
         return handle_stripe_webhook(request)
