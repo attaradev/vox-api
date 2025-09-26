@@ -160,12 +160,12 @@ jobs:
         run: |
           set -euo pipefail
           docker run -d --name vox-api-test -p 8000:8000 \
-            -e POSTGRES_HOST=localhost \
+            -e POSTGRES_HOST=postgres \
             -e POSTGRES_PORT=5432 \
             -e POSTGRES_DB=vox_db \
             -e POSTGRES_USER=vox_user \
             -e POSTGRES_PASSWORD=vox_pass \
-            -e REDIS_HOST=localhost \
+            -e REDIS_HOST=redis \
             -e REDIS_PORT=6379 \
             vox-api:dev
           for i in {1..30}; do
