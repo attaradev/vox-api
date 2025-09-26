@@ -1,0 +1,44 @@
+name: "Terraform Setup"
+description: "Setup Terraform with backend configuration"
+
+inputs:
+  working-directory:
+    description: "Terraform working directory"
+    required: true
+  state-bucket:
+    description: "Terraform state bucket"
+    required: true
+  backend-key:
+    description: "Terraform backend key"
+    required: true
+  environment:
+    description: "Deployment environment"
+    required: true
+  aws-region:
+    description: "AWS region"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_wrapper: false
+
+    - name: Prepare Terraform backend variables
+      run: |
+        set -euo pipefail
+        echo "TF_VAR_environment=${{ inputs.environment }}" >> "$GITHUB_ENV"
+        echo "TF_VAR_additional_tags={\"DeployedBy\":\"GitHubActions\",\"Workflow\":\"${GITHUB_WORKFLOW}\",\"RunId\":\"${GITHUB_RUN_ID}\",\"CommitSHA\":\"${GITHUB_SHA}\"}" >> "$GITHUB_ENV"
+      shell: bash
+
+    - name: Terraform Init (with backend)
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        terraform init -reconfigure -input=false \
+          -backend-config="bucket=${{ inputs.state-bucket }}" \
+          -backend-config="key=${{ inputs.backend-key }}" \
+          -backend-config="region=${{ inputs.aws-region }}"
+      shell: bash

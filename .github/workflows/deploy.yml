@@ -23,26 +23,25 @@ env:
   DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
 
 jobs:
-  bootstrap_state:
-    name: Bootstrap TF Backend
+  setup:
+    name: Setup Environment
     runs-on: ubuntu-latest
     permissions: { id-token: write, contents: read }
+    outputs:
+      tf_backend_key: ${{ steps.setup.outputs.tf_backend_key }}
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 1, persist-credentials: false }
-
-      - name: Configure AWS (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: AWS Setup
+        uses: ./.github/actions/aws-setup
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: gh-actions-${{ github.run_id }}
-          mask-aws-account-id: true
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
 
-      - name: Prepare Terraform environment variables
+      - name: Prepare environment variables
+        id: setup
         run: |
           set -euo pipefail
           TF_BACKEND_KEY="state/${{ env.DEPLOY_ENV }}/terraform.tfstate"
+          echo "tf_backend_key=${TF_BACKEND_KEY}" >> "$GITHUB_OUTPUT"
           echo "TF_BACKEND_KEY=${TF_BACKEND_KEY}" >> "$GITHUB_ENV"
           echo "TF_VAR_environment=${{ env.DEPLOY_ENV }}" >> "$GITHUB_ENV"
           echo "TF_VAR_additional_tags={\"DeployedBy\":\"GitHubActions\",\"Workflow\":\"${GITHUB_WORKFLOW}\",\"RunId\":\"${GITHUB_RUN_ID}\",\"CommitSHA\":\"${GITHUB_SHA}\"}" >> "$GITHUB_ENV"
@@ -68,10 +67,45 @@ jobs:
               "BlockPublicAcls":true,"IgnorePublicAcls":true,"BlockPublicPolicy":true,"RestrictPublicBuckets":true}'
           fi
 
-  terraform_infra:
-    name: Terraform (Init/Plan/Apply)
+  terraform_plan:
+    name: Terraform Plan
     runs-on: ubuntu-latest
-    needs: [bootstrap_state]
+    needs: [setup]
+    permissions: { id-token: write, contents: read }
+    steps:
+      - name: AWS Setup
+        uses: ./.github/actions/aws-setup
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+
+      - name: Terraform Setup
+        uses: ./.github/actions/terraform-setup
+        with:
+          working-directory: ${{ env.TF_WORKDIR }}
+          state-bucket: ${{ env.TF_STATE_BUCKET }}
+          backend-key: ${{ needs.setup.outputs.tf_backend_key }}
+          environment: ${{ env.DEPLOY_ENV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Select Terraform workspace
+        working-directory: ${{ env.TF_WORKDIR }}
+        run: |
+          set -euo pipefail
+          terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null || terraform workspace new "${{ env.DEPLOY_ENV }}"
+
+      - name: Terraform Validate & Plan
+        working-directory: ${{ env.TF_WORKDIR }}
+        run: |
+          set -euo pipefail
+          terraform fmt -check
+          terraform validate
+          terraform plan -out=tfplan -input=false -no-color
+
+  terraform_apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: [terraform_plan]
     permissions: { id-token: write, contents: read }
     outputs:
       apply_requested: ${{ steps.apply_mode.outputs.auto_apply }}
@@ -196,8 +230,8 @@ jobs:
   build_and_push_image:
     name: Build & Push Image
     runs-on: ubuntu-latest
-    needs: [terraform_infra]
-    if: needs.terraform_infra.outputs.apply_requested == 'true'
+    needs: [terraform_apply]
+    if: needs.terraform_apply.outputs.apply_requested == 'true'
     permissions: { id-token: write, contents: read }
     steps:
       - uses: actions/checkout@v4
@@ -247,8 +281,8 @@ jobs:
   deploy_ecs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
-    needs: [terraform_infra]
-    if: needs.terraform_infra.outputs.apply_requested == 'true'
+    needs: [terraform_apply]
+    if: needs.terraform_apply.outputs.apply_requested == 'true'
     environment: ${{ github.event.inputs.environment || 'production' }}
     permissions: { id-token: write, contents: read }
     steps:
@@ -318,13 +352,13 @@ jobs:
           }
 
           NEW_IMAGE="${{ steps.deployment_image.outputs.image }}"
-          register_task_definition "${{ needs.terraform_infra.outputs.ecs_task_family }}" "api" "td-api" "$NEW_IMAGE"
-          register_task_definition "${{ needs.terraform_infra.outputs.celery_task_family }}" "celery" "td-celery" "$NEW_IMAGE"
+          register_task_definition "${{ needs.terraform_apply.outputs.ecs_task_family }}" "api" "td-api" "$NEW_IMAGE"
+          register_task_definition "${{ needs.terraform_apply.outputs.celery_task_family }}" "celery" "td-celery" "$NEW_IMAGE"
 
       - name: Update ECS API service
         env:
-          ECS_CLUSTER: ${{ needs.terraform_infra.outputs.ecs_cluster_name }}
-          ECS_SERVICE: ${{ needs.terraform_infra.outputs.ecs_service_name }}
+          ECS_CLUSTER: ${{ needs.terraform_apply.outputs.ecs_cluster_name }}
+          ECS_SERVICE: ${{ needs.terraform_apply.outputs.ecs_service_name }}
           TASK_DEF_ARN: ${{ steps.register_td.outputs.api_task_definition_arn }}
         run: |
           set -euo pipefail
@@ -343,8 +377,8 @@ jobs:
 
       - name: Update ECS Celery service
         env:
-          ECS_CLUSTER: ${{ needs.terraform_infra.outputs.ecs_cluster_name }}
-          CELERY_SERVICE: ${{ needs.terraform_infra.outputs.celery_service_name }}
+          ECS_CLUSTER: ${{ needs.terraform_apply.outputs.ecs_cluster_name }}
+          CELERY_SERVICE: ${{ needs.terraform_apply.outputs.celery_service_name }}
           CELERY_TASK_DEF_ARN: ${{ steps.register_td.outputs.celery_task_definition_arn }}
         run: |
           set -euo pipefail
