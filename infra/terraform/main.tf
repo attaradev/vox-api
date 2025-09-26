@@ -133,8 +133,15 @@ module "network" {
 # SECURITY GROUPS
 # -----------------------------------------------------------------------------
 
+resource "random_id" "alb_sg_suffix" {
+  byte_length = 16
+  keepers = {
+    vpc_id = module.network.vpc_id
+  }
+}
+
 resource "aws_security_group" "alb" {
-  name        = "${local.name_prefix}-alb-${substr(sha256(module.network.vpc_id), 0, 8)}"
+  name        = "${local.name_prefix}-alb-${random_id.alb_sg_suffix.hex}"
   description = "Allow inbound web traffic"
   vpc_id      = module.network.vpc_id
 

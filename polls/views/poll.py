@@ -2,6 +2,7 @@
 
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from drf_spectacular.utils import extend_schema
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -133,6 +134,17 @@ class PollViewSet(viewsets.ModelViewSet):
         methods=["get", "post"],
         url_path="questions/(?P<question_id>[^/.]+)/choices",
     )
+    @extend_schema(
+        parameters=[
+            {
+                "name": "question_id",
+                "in": "path",
+                "description": "ID of the question",
+                "required": True,
+                "schema": {"type": "integer"},
+            }
+        ]
+    )
     def question_choices(self, request, pk=None, question_id=None):
         """List or create choices for a specific question."""
 
@@ -155,6 +167,17 @@ class PollViewSet(viewsets.ModelViewSet):
         detail=True,
         methods=["post"],
         url_path="questions/(?P<question_id>[^/.]+)/choices/reorder",
+    )
+    @extend_schema(
+        parameters=[
+            {
+                "name": "question_id",
+                "in": "path",
+                "description": "ID of the question",
+                "required": True,
+                "schema": {"type": "integer"},
+            }
+        ]
     )
     def reorder_choices(self, request, pk=None, question_id=None):
         """Reorder choices within a question."""
