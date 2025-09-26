@@ -223,6 +223,7 @@ jobs:
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           REGION=${{ env.AWS_REGION }}
           REPO_NAME="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/vox-api-production-api"
+          echo "Constructed ECR repository URL: $REPO_NAME" >&2
           echo "ecr_repo_url=${REPO_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to ECR
@@ -240,6 +241,7 @@ jobs:
             exit 1
           fi
           IMAGE="${ECR_REPO_URL}:${IMAGE_TAG}"
+          echo "Building and pushing image: $IMAGE" >&2
           docker build --pull --tag "$IMAGE" .
           docker push "$IMAGE"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
@@ -279,6 +281,11 @@ jobs:
             echo "Error: ECS task family output was empty" >&2
             exit 1
           fi
+          echo "Registering task definition with image: $NEW_IMAGE" >&2
+          if [ -z "$NEW_IMAGE" ]; then
+            echo "Error: NEW_IMAGE is empty" >&2
+            exit 1
+          fi
           aws ecs describe-task-definition \
             --task-definition "$ECS_TASK_FAMILY" \
             --query 'taskDefinition' > td-api.json
@@ -300,6 +307,11 @@ jobs:
           set -euo pipefail
           if [ -z "$CELERY_TASK_FAMILY" ]; then
             echo "Error: Celery task family output was empty" >&2
+            exit 1
+          fi
+          echo "Registering Celery task definition with image: $NEW_IMAGE" >&2
+          if [ -z "$NEW_IMAGE" ]; then
+            echo "Error: NEW_IMAGE is empty for Celery" >&2
             exit 1
           fi
           aws ecs describe-task-definition \
