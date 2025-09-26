@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+ENV DJANGO_SETTINGS_MODULE=vox_api.settings
 
 # Python deps
 COPY requirements.txt ./
@@ -25,11 +26,13 @@ COPY . .
 COPY docker-entrypoint.sh /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint
 
-# Production stage
-FROM base AS prod
-ENV DJANGO_SETTINGS_MODULE=vox_api.settings.production
-RUN python manage.py collectstatic --noinput
-RUN python manage.py migrate
+# Development stage (optional target)
+FROM base AS development
+ENTRYPOINT ["/usr/local/bin/entrypoint"]
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+
+# Production stage (default)
+FROM base AS production
 
 # Use non-root user
 RUN useradd --create-home appuser
@@ -37,8 +40,3 @@ USER appuser
 
 ENTRYPOINT ["/usr/local/bin/entrypoint"]
 CMD ["gunicorn", "vox_api.wsgi:application", "--bind", "0.0.0.0:8000"]
-
-# Dev stage
-FROM base AS dev
-ENTRYPOINT ["/usr/local/bin/entrypoint"]
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]

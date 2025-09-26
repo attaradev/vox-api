@@ -18,6 +18,12 @@ variable "target_group_name" {
   type        = string
 }
 
+variable "target_group_port" {
+  description = "Port number the target group forwards traffic to on the target."
+  type        = number
+  default     = 8000
+}
+
 variable "vpc_id" {
   description = "VPC ID"
   type        = string
@@ -26,6 +32,12 @@ variable "vpc_id" {
 variable "alb_logs_bucket" {
   description = "S3 bucket for ALB access logs"
   type        = string
+}
+
+variable "https_certificate_arn" {
+  description = "ACM certificate ARN for HTTPS listener (optional)"
+  type        = string
+  default     = ""
 }
 
 variable "tags" {

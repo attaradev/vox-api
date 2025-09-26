@@ -23,6 +23,10 @@ class Poll(models.Model):
     )
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
+    require_all_questions = models.BooleanField(
+        default=False,
+        help_text="Require answers to all questions when voting",
+    )
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -60,9 +64,9 @@ class Poll(models.Model):
             )
 
         if new_status == self.Status.ACTIVE:
-            if not self.choices.exists():
+            if not self.questions.filter(choices__isnull=False).exists():
                 raise ValidationError(
-                    {"status": "Add at least one choice before activating."}
+                    {"status": "Add at least one valid question before activating."}
                 )
 
         self.status = new_status

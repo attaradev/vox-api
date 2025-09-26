@@ -1,6 +1,6 @@
-output "alb_ip_addresses" {
-  description = "List of IP addresses for the Application Load Balancer (for DNS/domain setup)"
-  value       = module.alb.alb_ip_addresses
+output "alb_hosted_zone_id" {
+  description = "Route 53 hosted zone ID for the Application Load Balancer"
+  value       = module.alb.alb_zone_id
 }
 
 output "ecr_repository_url" {

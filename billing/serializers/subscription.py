@@ -23,3 +23,16 @@ class SubscriptionSerializer(serializers.ModelSerializer):
             "ended_at",
             "plan",
         ]
+
+
+class CreateSubscriptionRequestSerializer(serializers.Serializer):
+    """Validate subscription creation payloads."""
+
+    price_id = serializers.CharField(required=False, allow_blank=False)
+
+
+class SubscriptionStatusResponseSerializer(serializers.Serializer):
+    """Serializer for subscription status responses."""
+
+    status = serializers.CharField()
+    provider_id = serializers.CharField(allow_null=True, required=False)

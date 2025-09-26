@@ -1,6 +1,7 @@
 # Redis configuration
 import os
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from vox_api.aws_secrets import get_aws_secret
 
@@ -8,10 +9,6 @@ REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
 
-# Example: Use Redis for Celery broker and backend if specified
-if os.environ.get("USE_REDIS_FOR_CELERY", "1") == "1":
-    CELERY_BROKER_URL = REDIS_URL
-    CELERY_RESULT_BACKEND = REDIS_URL
 # Logging configuration
 
 
@@ -55,12 +52,6 @@ EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 
 # Frontend URL for password reset links
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://your-frontend")
-
-# Celery settings
-CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "memory://")
-CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "cache+memory://")
-CELERY_TASK_ALWAYS_EAGER = os.environ.get("CELERY_TASK_ALWAYS_EAGER", "1") == "1"
-CELERY_TASK_EAGER_PROPAGATES = True
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -110,12 +101,40 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+
+def _database_config_from_url(url: str) -> dict:
+    parsed = urlparse(url)
+    scheme = parsed.scheme
+    if "+" in scheme:
+        scheme = scheme.split("+", 1)[0]
+    scheme = scheme.replace("postgresql", "postgres")
+    if not scheme.startswith("postgres"):
+        raise ValueError(f"Unsupported database backend '{parsed.scheme}'.")
+
+    query_params = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
+
+    config: dict[str, object] = {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": parsed.path.lstrip("/") or "postgres",
+        "USER": parsed.username or "",
+        "PASSWORD": parsed.password or "",
+        "HOST": parsed.hostname or "",
+        "PORT": str(parsed.port or "5432"),
+    }
+    if query_params:
+        config["OPTIONS"] = query_params
+    return config
+
+
 if os.environ.get("DJANGO_ENV") == "production":
     # Load secrets from AWS Secrets Manager
     secret_config = get_aws_secret(
         os.environ.get("DJANGO_AWS_SECRET_NAME", "vox-api-config")
     )
     SECRET_KEY = secret_config.get("DJANGO_SECRET_KEY")
+    database_url = secret_config.get("DATABASE_URL")
     POSTGRES_DB = secret_config.get("POSTGRES_DB")
     POSTGRES_USER = secret_config.get("POSTGRES_USER")
     POSTGRES_PASSWORD = secret_config.get("POSTGRES_PASSWORD")
@@ -125,15 +144,58 @@ if os.environ.get("DJANGO_ENV") == "production":
     AWS_ACCESS_KEY_ID = secret_config.get("AWS_ACCESS_KEY_ID", "")
     AWS_SECRET_ACCESS_KEY = secret_config.get("AWS_SECRET_ACCESS_KEY", "")
     AWS_S3_REGION_NAME = secret_config.get("AWS_S3_REGION_NAME", "us-east-1")
-    STRIPE_SECRET_KEY = secret_config.get(
-        "STRIPE_SECRET_KEY", "sk_test_your_default_key"
+    STRIPE_SECRET_KEY = secret_config.get("STRIPE_SECRET_KEY") or os.environ.get(
+        "STRIPE_SECRET_KEY",
+        "",
     )
+    STRIPE_WEBHOOK_SECRET = secret_config.get(
+        "STRIPE_WEBHOOK_SECRET"
+    ) or os.environ.get(
+        "STRIPE_WEBHOOK_SECRET",
+        "",
+    )
+    if database_url:
+        DATABASE_URL = database_url
 else:
     SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-change-me")
+
+    STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "sk_test_your_default_key")
+    STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
 # Set DEBUG based on DJANGO_ENV
 DJANGO_ENV = os.environ.get("DJANGO_ENV", "development")
 DEBUG = DJANGO_ENV == "development"
+
+use_redis_pref = os.environ.get("USE_REDIS_FOR_CELERY")
+if use_redis_pref is None:
+    USE_REDIS_FOR_CELERY = not DEBUG
+else:
+    USE_REDIS_FOR_CELERY = use_redis_pref == "1"
+
+celery_broker = os.environ.get("CELERY_BROKER_URL")
+celery_backend = os.environ.get("CELERY_RESULT_BACKEND")
+
+if USE_REDIS_FOR_CELERY and not celery_broker:
+    celery_broker = REDIS_URL
+if USE_REDIS_FOR_CELERY and not celery_backend:
+    celery_backend = REDIS_URL
+
+CELERY_BROKER_URL = celery_broker or "memory://"
+
+if celery_backend:
+    CELERY_RESULT_BACKEND = celery_backend
+elif CELERY_BROKER_URL.startswith("redis://"):
+    CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+else:
+    CELERY_RESULT_BACKEND = "cache+memory://"
+
+celery_eager_env = os.environ.get("CELERY_TASK_ALWAYS_EAGER")
+if celery_eager_env is None:
+    CELERY_TASK_ALWAYS_EAGER = DEBUG
+else:
+    CELERY_TASK_ALWAYS_EAGER = celery_eager_env == "1"
+
+CELERY_TASK_EAGER_PROPAGATES = True
 
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "0.0.0.0,localhost").split(",")
 
@@ -191,7 +253,9 @@ WSGI_APPLICATION = "vox_api.wsgi.application"
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
 
-if os.environ.get("DJANGO_ENV") == "production":
+if DATABASE_URL:
+    DATABASES = {"default": _database_config_from_url(DATABASE_URL)}
+elif os.environ.get("DJANGO_ENV") == "production":
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
@@ -202,25 +266,24 @@ if os.environ.get("DJANGO_ENV") == "production":
             "PORT": POSTGRES_PORT,
         }
     }
+elif os.environ.get("POSTGRES_DB"):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("POSTGRES_DB"),
+            "USER": os.environ.get("POSTGRES_USER"),
+            "PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
+            "HOST": os.environ.get("POSTGRES_HOST", "db"),
+            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+        }
+    }
 else:
-    if os.environ.get("POSTGRES_DB"):
-        DATABASES = {
-            "default": {
-                "ENGINE": "django.db.backends.postgresql",
-                "NAME": os.environ.get("POSTGRES_DB"),
-                "USER": os.environ.get("POSTGRES_USER"),
-                "PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
-                "HOST": os.environ.get("POSTGRES_HOST", "db"),
-                "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-            }
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": str(BASE_DIR / "db.sqlite3"),
         }
-    else:
-        DATABASES = {
-            "default": {
-                "ENGINE": "django.db.backends.sqlite3",
-                "NAME": str(BASE_DIR / "db.sqlite3"),
-            }
-        }
+    }
 
 
 # Password validation
@@ -298,6 +361,3 @@ SPECTACULAR_SETTINGS = {
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-if os.environ.get("DJANGO_ENV") != "production":
-    STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "sk_test_your_default_key")

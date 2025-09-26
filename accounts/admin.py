@@ -34,8 +34,15 @@ class AccountAdmin(admin.ModelAdmin):
         "billing_email",
         "subscription_status",
         "payment_provider_id",
+        "status",
     )
     search_fields = ("name", "billing_email")
+    list_filter = ("status", "tier")
+    readonly_fields = (
+        "created_at",
+        "status_changed_at",
+        "status_changed_by",
+    )
 
     def save_model(self, request, obj, form, change):
         """Audit account creation and updates."""

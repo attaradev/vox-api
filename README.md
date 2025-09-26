@@ -88,10 +88,10 @@ This project ships with modular Terraform code for secure AWS deployment. See `i
 
 **Outputs for domain setup:**
 
-- The ALB module outputs `alb_ip_addresses` and `alb_dns_name` for DNS and domain configuration. Example:
+- The ALB module outputs `alb_hosted_zone_id` and `alb_dns_name` for DNS and domain configuration. Example:
 
   ```sh
-  terraform output alb_ip_addresses
+  terraform output alb_hosted_zone_id
   terraform output alb_dns_name
   ```
 

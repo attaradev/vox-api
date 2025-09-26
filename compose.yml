@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: development
     container_name: vox-api
     init: true
     env_file: .env
@@ -27,6 +28,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: development
     container_name: vox-celery
     init: true
     command: celery -A vox_api worker --loglevel=info

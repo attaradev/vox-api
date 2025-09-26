@@ -99,16 +99,44 @@ class AccountViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
-    @action(detail=True, methods=["post"], url_path="set-tier")
+    @action(detail=True, methods=["post", "patch"], url_path="tier")
     def set_tier(self, request, pk=None):
         """Assign a tier to the selected account."""
 
         account = self.get_object()
         tier_id = request.data.get("tier_id")
         tier = get_object_or_404(AccountTier, pk=tier_id)
-        account.tier = tier
-        account.save(update_fields=["tier"])
-        return Response(AccountSerializer(account).data)
+        account.change_tier(tier, user=request.user)
+        serializer = self.get_serializer(account)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request, pk=None):
+        """Approve an account for use."""
+
+        account = self.get_object()
+        account.approve(request.user)
+        serializer = self.get_serializer(account)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="suspend")
+    def suspend(self, request, pk=None):
+        """Suspend an account with an optional reason."""
+
+        account = self.get_object()
+        reason = request.data.get("reason", "")
+        account.suspend(request.user, reason=reason)
+        serializer = self.get_serializer(account)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="reinstate")
+    def reinstate(self, request, pk=None):
+        """Reinstate a previously suspended account."""
+
+        account = self.get_object()
+        account.reinstate(request.user)
+        serializer = self.get_serializer(account)
+        return Response(serializer.data)
 
 
 class AccountTierViewSet(viewsets.ModelViewSet):

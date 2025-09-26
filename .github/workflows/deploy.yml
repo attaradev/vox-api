@@ -7,6 +7,10 @@ on:
         description: "Deployment environment (e.g. production, staging)"
         required: false
         default: production
+      auto_apply:
+        description: "Apply Terraform changes and deploy"
+        required: false
+        default: "false"
 
 concurrency:
   group: deploy-${{ github.workflow }}-${{ github.event.inputs.environment || 'production' }}-${{ github.ref }}
@@ -74,6 +78,7 @@ jobs:
     permissions: { id-token: write, contents: read }
     outputs:
       ecr_repo_url: ${{ steps.outputs_step.outputs.ecr_repo_url }}
+      apply_requested: ${{ steps.apply_mode.outputs.auto_apply }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
@@ -89,6 +94,25 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with: { terraform_wrapper: false }
+
+      - name: Determine apply mode
+        id: apply_mode
+        run: |
+          AUTO_APPLY_INPUT="${{ github.event.inputs.auto_apply || 'false' }}"
+          AUTO_APPLY=$(echo "$AUTO_APPLY_INPUT" | tr '[:upper:]' '[:lower:]')
+          if [[ "$AUTO_APPLY" != "true" ]]; then
+            AUTO_APPLY="false"
+          fi
+          echo "Auto-apply set to $AUTO_APPLY"
+          echo "auto_apply=$AUTO_APPLY" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Terraform backend variables
+        run: |
+          set -euo pipefail
+          TF_BACKEND_KEY="state/${{ env.DEPLOY_ENV }}/terraform.tfstate"
+          echo "TF_BACKEND_KEY=${TF_BACKEND_KEY}" >> "$GITHUB_ENV"
+          echo "TF_VAR_environment=${{ env.DEPLOY_ENV }}" >> "$GITHUB_ENV"
+          echo "TF_VAR_additional_tags={\"DeployedBy\":\"GitHubActions\",\"Workflow\":\"${GITHUB_WORKFLOW}\",\"RunId\":\"${GITHUB_RUN_ID}\",\"CommitSHA\":\"${GITHUB_SHA}\"}" >> "$GITHUB_ENV"
 
       - name: Terraform Init (with backend)
         working-directory: ${{ env.TF_WORKDIR }}
@@ -110,6 +134,7 @@ jobs:
           terraform plan -out=tfplan -input=false -no-color
 
       - name: Terraform Apply
+        if: steps.apply_mode.outputs.auto_apply == 'true'
         working-directory: ${{ env.TF_WORKDIR }}
         run: |
           set -euo pipefail
@@ -132,12 +157,13 @@ jobs:
         run: |
           set -euo pipefail
           terraform output -no-color alb_dns_name || true
-          terraform output -no-color alb_ip_addresses || true
+          terraform output -no-color alb_hosted_zone_id || true
 
   build_and_push_image:
     name: Build & Push Image
     runs-on: ubuntu-latest
     needs: [terraform_infra]
+    if: needs.terraform_infra.outputs.apply_requested == 'true'
     permissions: { id-token: write, contents: read }
     outputs:
       image: ${{ steps.build_push.outputs.image }}
@@ -174,7 +200,9 @@ jobs:
   deploy_ecs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
-    needs: [build_and_push_image]
+    needs: [terraform_infra, build_and_push_image]
+    if: needs.terraform_infra.outputs.apply_requested == 'true' && needs.build_and_push_image.result == 'success'
+    environment: ${{ github.event.inputs.environment || 'production' }}
     permissions: { id-token: write, contents: read }
     steps:
       - uses: actions/checkout@v4

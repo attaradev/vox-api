@@ -33,6 +33,12 @@ variable "subnet_ids" {
   type        = list(string)
 }
 
+variable "multi_az" {
+  description = "Deploy the RDS instance in a Multi-AZ configuration"
+  type        = bool
+  default     = false
+}
+
 variable "family" {
   description = "The family of the DB parameter group"
   type        = string

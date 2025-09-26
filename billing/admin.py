@@ -21,7 +21,10 @@ class BillingAccountAdmin(admin.ModelAdmin):
             action=action,
             object_type="BillingAccount",
             object_id=obj.id,
-            details={"account": obj.account.name, "status": obj.status},
+            details={
+                "account": obj.account.name,
+                "status": obj.subscription_status,
+            },
         )
 
     def delete_model(self, request, obj):
@@ -32,7 +35,10 @@ class BillingAccountAdmin(admin.ModelAdmin):
             action="billing_account_delete",
             object_type="BillingAccount",
             object_id=obj.id,
-            details={"account": obj.account.name, "status": obj.status},
+            details={
+                "account": obj.account.name,
+                "status": obj.subscription_status,
+            },
         )
         super().delete_model(request, obj)
 

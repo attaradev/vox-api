@@ -21,6 +21,7 @@ class AccountSerializer(serializers.ModelSerializer):
     tier_features = serializers.SerializerMethodField(read_only=True)
     member_count = serializers.SerializerMethodField(read_only=True)
     poll_limit_remaining = serializers.SerializerMethodField(read_only=True)
+    status_changed_by = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
         model = Account
@@ -35,6 +36,11 @@ class AccountSerializer(serializers.ModelSerializer):
             "tier_features",
             "member_count",
             "poll_limit_remaining",
+            "status",
+            "status_changed_at",
+            "status_changed_by",
+            "status_reason",
+            "is_active",
         ]
         read_only_fields = [
             "created_at",
@@ -43,10 +49,15 @@ class AccountSerializer(serializers.ModelSerializer):
             "tier_features",
             "member_count",
             "poll_limit_remaining",
+            "status",
+            "status_changed_at",
+            "status_changed_by",
+            "status_reason",
+            "is_active",
         ]
 
-    @extend_schema_field(serializers.ListField(child=serializers.CharField()))
-    def get_tier_features(self, obj) -> list[str]:
+    @extend_schema_field(serializers.DictField(child=serializers.CharField()))
+    def get_tier_features(self, obj) -> dict:
         """Return tier features for the account."""
         return obj.tier_features()
 

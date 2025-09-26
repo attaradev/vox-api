@@ -148,6 +148,12 @@ variable "rds_instance_class" {
   default     = "db.t3.micro"
 }
 
+variable "rds_multi_az" {
+  description = "Whether to deploy the RDS instance with Multi-AZ enabled"
+  type        = bool
+  default     = false
+}
+
 variable "db_username" {
   description = "Database username"
   type        = string
@@ -259,7 +265,7 @@ variable "ecs_task_execution_policy_arns" {
   default = [
     "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
     "arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess",
-    "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
+    "arn:aws:iam::aws:policy/SecretsManagerReadOnlyAccess"
   ]
 }
 

@@ -13,8 +13,8 @@ class VoteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Vote
-        fields = ["id", "poll", "choice", "voter", "voted_at"]
-        read_only_fields = ["poll", "choice", "voter", "voted_at"]
+        fields = ["id", "poll", "question", "choice", "voter", "voted_at"]
+        read_only_fields = ["poll", "question", "choice", "voter", "voted_at"]
 
 
 class VoteCastSerializer(serializers.Serializer):
@@ -22,7 +22,7 @@ class VoteCastSerializer(serializers.Serializer):
 
     choice_id = serializers.PrimaryKeyRelatedField(
         source="choice",
-        queryset=Choice.objects.select_related("poll"),
+        queryset=Choice.objects.select_related("poll", "question"),
     )
 
     def validate(self, attrs):
@@ -33,4 +33,5 @@ class VoteCastSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"choice_id": "Choice does not belong to this poll."}
             )
+        attrs["question"] = choice.question
         return attrs

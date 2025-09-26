@@ -4,7 +4,6 @@ terraform {
     key          = "state/terraform.tfstate"
     region       = "us-east-1"
     encrypt      = true
-    use_lockfile = true
   }
   required_providers {
     aws = {
@@ -72,7 +71,8 @@ module "s3_media" {
 module "s3_logs" {
   source         = "./modules/s3"
   s3_bucket_name = var.alb_logs_bucket
-  tags           = merge(local.common_tags, { Purpose = "alb-access-logs" })
+  allow_log_delivery = true
+  tags               = merge(local.common_tags, { Purpose = "alb-access-logs" })
 }
 
 resource "aws_security_group" "alb" {
@@ -247,6 +247,7 @@ module "rds" {
   vpc_security_group_ids = [aws_security_group.rds.id]
   subnet_ids             = module.vpc.private_subnets
   family                 = var.db_family
+  multi_az               = var.rds_multi_az
   tags                   = merge(local.common_tags, { Name = var.rds_identifier })
 }
 

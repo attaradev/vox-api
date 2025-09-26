@@ -10,11 +10,11 @@ from .views import (
 
 router = DefaultRouter()
 router.register(r"accounts", AccountViewSet, basename="account")
-router.register(r"tiers", AccountTierViewSet, basename="account-tier")
+router.register(r"tiers", AccountTierViewSet, basename="account_tier")
 router.register(r"permissions", PermissionViewSet, basename="permission")
 router.register(
-    r"account-permissions", AccountPermissionViewSet, basename="account-permission"
+    r"account_permissions", AccountPermissionViewSet, basename="account_permission"
 )
-router.register(r"role-permissions", RolePermissionViewSet, basename="role-permission")
+router.register(r"role_permissions", RolePermissionViewSet, basename="role_permission")
 
 urlpatterns = router.urls

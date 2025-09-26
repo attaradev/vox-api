@@ -4,13 +4,13 @@ from rest_framework import serializers
 
 from polls.models.poll import Poll
 
-from .choice import ChoiceSerializer
+from .question import QuestionSerializer
 
 
 class PollSerializer(serializers.ModelSerializer):
-    """Serializer for poll objects, including choices."""
+    """Serializer for poll objects, including ordered questions."""
 
-    choices = ChoiceSerializer(many=True, read_only=True)
+    questions = QuestionSerializer(many=True, read_only=True)
 
     class Meta:
         model = Poll
@@ -20,17 +20,18 @@ class PollSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "status",
+            "require_all_questions",
             "created_at",
             "updated_at",
             "published_at",
-            "choices",
+            "questions",
         ]
         read_only_fields = [
             "created_at",
             "updated_at",
             "published_at",
             "status",
-            "choices",
+            "questions",
         ]
 
     def validate(self, attrs):
@@ -39,6 +40,10 @@ class PollSerializer(serializers.ModelSerializer):
         if account and self.instance is None and not account.can_add_poll():
             raise serializers.ValidationError(
                 {"account": "Poll limit reached for the selected account."}
+            )
+        if account and not account.is_active:
+            raise serializers.ValidationError(
+                {"account": "Account must be active to create polls."}
             )
         return super().validate(attrs)
 

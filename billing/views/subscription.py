@@ -1,6 +1,6 @@
 """Views for managing subscription resources and provider flows."""
 
-from rest_framework import generics, permissions, serializers, status
+from rest_framework import generics, permissions, status
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -9,7 +9,11 @@ from billing.models import BillingAccount
 from billing.models.subscription import Subscription
 from billing.providers.paypal import PayPalProvider
 from billing.providers.stripe import StripeProvider
-from billing.serializers.subscription import SubscriptionSerializer
+from billing.serializers.subscription import (
+    CreateSubscriptionRequestSerializer,
+    SubscriptionSerializer,
+    SubscriptionStatusResponseSerializer,
+)
 from core.utils.audit import log_audit
 
 
@@ -81,18 +85,20 @@ class SubscriptionStatusView(GenericAPIView):
     """Return subscription status details for the requesting account."""
 
     permission_classes = [IsAuthenticated]
-    serializer_class = serializers.Serializer  # No input, just output
+    serializer_class = SubscriptionStatusResponseSerializer
 
     def get(self, request, account_id):
         """Fetch subscription status for a given account or return a 404."""
         try:
             billing = BillingAccount.objects.get(account_id=account_id)
-            return Response(
-                {
-                    "status": billing.subscription_status,
-                    "provider_id": billing.payment_provider_id,
-                }
+            payload = {
+                "status": billing.subscription_status,
+                "provider_id": billing.payment_provider_id,
+            }
+            serializer = self.serializer_class(
+                payload, context=self.get_serializer_context()
             )
+            return Response(serializer.data)
         except BillingAccount.DoesNotExist:
             return Response(
                 {"detail": "Billing info not found."},
@@ -104,12 +110,14 @@ class CreateSubscriptionView(GenericAPIView):
     """Create a new subscription using the configured billing provider."""
 
     permission_classes = [IsAuthenticated]
-    serializer_class = serializers.Serializer
+    serializer_class = CreateSubscriptionRequestSerializer
 
     def post(self, request, account_id):
         """
         Create a subscription through Stripe or PayPal based on account data."""
-        price_id = request.data.get("price_id")
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        price_id = serializer.validated_data.get("price_id")
         try:
             billing = BillingAccount.objects.get(account_id=account_id)
             provider_name = getattr(billing, "provider", "stripe")

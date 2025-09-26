@@ -10,16 +10,16 @@ from .views import (
 )
 
 urlpatterns = [
-    path("register/", RegisterView.as_view(), name="user-register"),
-    path("login/", TokenView.as_view(), name="user-login"),
+    path("register/", RegisterView.as_view(), name="user_register"),
+    path("login/", TokenView.as_view(), name="user_login"),
     path(
-        "password-resets/request/",
+        "password/reset/request/",
         PasswordResetRequestView.as_view(),
-        name="password-reset-request",
+        name="password_reset_request",
     ),
     path(
-        "password-resets/confirm/",
+        "password/reset/confirm/",
         PasswordResetConfirmView.as_view(),
-        name="password-reset-confirm",
+        name="password_reset_confirm",
     ),
 ]

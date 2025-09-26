@@ -13,7 +13,7 @@ module "rds" {
   subnet_ids              = var.subnet_ids
   storage_encrypted       = true
   backup_retention_period = 7
-  multi_az                = true
+  multi_az                = var.multi_az
   publicly_accessible     = false
   family                  = var.family
   tags                    = var.tags

@@ -13,7 +13,7 @@ output "target_group_arn" {
   value       = aws_lb_target_group.app.arn
 }
 
-output "alb_ip_addresses" {
-  description = "DNS name of the Application Load Balancer (for DNS/domain setup)"
-  value       = aws_lb.app.dns_name
+output "alb_zone_id" {
+  description = "Canonical hosted zone ID for the Application Load Balancer"
+  value       = aws_lb.app.zone_id
 }

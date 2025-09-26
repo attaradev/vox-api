@@ -16,7 +16,12 @@ def test_account_creation_without_tier():
 @pytest.mark.django_db
 def test_account_tier_limits_enforced():
     tier = AccountTier.objects.create(name="Pro", max_members=1, max_polls=1)
-    account = Account.objects.create(name="TierOrg", tier=tier)
+    account = Account.objects.create(
+        name="TierOrg",
+        tier=tier,
+        status="approved",
+        subscription_status="active",
+    )
 
     assert account.can_add_member() is True
     assert account.can_add_poll() is True
