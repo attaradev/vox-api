@@ -1,8 +1,19 @@
-# Logging configuration
+# Redis configuration
 import os
 from pathlib import Path
 
 from vox_api.aws_secrets import get_aws_secret
+
+REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
+REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
+
+# Example: Use Redis for Celery broker and backend if specified
+if os.environ.get("USE_REDIS_FOR_CELERY", "1") == "1":
+    CELERY_BROKER_URL = REDIS_URL
+    CELERY_RESULT_BACKEND = REDIS_URL
+# Logging configuration
+
 
 LOGGING = {
     "version": 1,
