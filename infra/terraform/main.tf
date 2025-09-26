@@ -19,6 +19,21 @@ provider "aws" {
   region = var.aws_region
 }
 
+resource "random_password" "db_password" {
+  length  = 16
+  special = true
+}
+
+resource "random_password" "app_secret_key" {
+  length  = 32
+  special = true
+}
+
+resource "random_password" "app_api_token" {
+  length  = 32
+  special = true
+}
+
 module "elasticache" {
   source             = "./modules/elasticache"
   cluster_id         = "vox-api-redis-cluster"
@@ -51,7 +66,7 @@ module "asm_rds" {
   secret_name = var.asm_secret_name
   secret_string = jsonencode({
     username = var.db_username
-    password = var.db_password
+    password = random_password.db_password.result
     db_name  = var.db_name
   })
   secret_access_policy_json = var.asm_secret_access_policy_json
@@ -60,8 +75,8 @@ module "asm_app" {
   source      = "./modules/asm"
   secret_name = "vox-api-app-secret"
   secret_string = jsonencode({
-    app_key   = var.app_secret_key
-    api_token = var.app_api_token
+    app_key   = random_password.app_secret_key.result
+    api_token = random_password.app_api_token.result
   })
   secret_access_policy_json = var.asm_secret_access_policy_json
 }
@@ -85,7 +100,7 @@ module "rds" {
   rds_identifier         = "vox-api-rds"
   rds_instance_class     = var.rds_instance_class
   db_username            = var.db_username
-  db_password            = var.db_password
+  db_password            = random_password.db_password.result
   db_name                = var.db_name
   vpc_security_group_ids = [module.asg.security_group_id]
   subnet_ids             = module.vpc.private_subnets
@@ -149,7 +164,7 @@ resource "aws_ecs_cluster" "app" {
 resource "aws_ssm_parameter" "database_url" {
   name  = "/vox-api/database-url"
   type  = "SecureString"
-  value = var.database_url
+  value = "postgres://${var.db_username}:${random_password.db_password.result}@<rds-endpoint>:5432/${var.db_name}"
 }
 
 resource "aws_secretsmanager_secret" "django_secret_key" {
@@ -159,7 +174,7 @@ resource "aws_secretsmanager_secret" "django_secret_key" {
 
 resource "aws_secretsmanager_secret_version" "django_secret_key" {
   secret_id     = aws_secretsmanager_secret.django_secret_key.id
-  secret_string = var.app_secret_key
+  secret_string = random_password.app_secret_key.result
 }
 
 resource "aws_ecs_task_definition" "app" {

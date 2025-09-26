@@ -136,12 +136,6 @@ variable "db_username" {
   default     = "postgres"
 }
 
-variable "db_password" {
-  description = "Database password"
-  type        = string
-  sensitive   = true
-}
-
 variable "db_name" {
   description = "Database name"
   type        = string
@@ -190,17 +184,7 @@ variable "asm_secret_access_policy_json" {
   default     = ""
 }
 
-variable "app_secret_key" {
-  description = "Application secret key for ASM secret."
-  type        = string
-  sensitive   = true
-}
 
-variable "app_api_token" {
-  description = "Application API token for ASM secret."
-  type        = string
-  sensitive   = true
-}
 
 variable "vpc_flow_log_group_name" {
   description = "CloudWatch log group name for VPC flow logs"
@@ -244,11 +228,6 @@ variable "image_tag" {
   default     = "latest"
 }
 
-variable "database_url" {
-  description = "Database connection URL for the app."
-  type        = string
-  sensitive   = true
-}
 
 variable "ecs_service_name" {
   description = "Name of the ECS service."
