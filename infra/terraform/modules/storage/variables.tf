@@ -16,7 +16,8 @@ variable "db_allocated_storage" {
 variable "db_engine_version" {
   description = "Postgres engine version"
   type        = string
-  default     = "17.4"
+  # Leave blank by default so the provider uses the AWS default engine version for the region.
+  default = ""
 }
 
 variable "db_instance_class" {

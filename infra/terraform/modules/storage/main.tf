@@ -25,7 +25,8 @@ locals {
     ]
   })
 
-  repository_name = trimspace(var.ecr_repository_name) != "" ? var.ecr_repository_name : lower(replace(var.project, "_", "-"))
+  # Use explicit override when provided, otherwise use var.project directly (user requested repository name = project)
+  repository_name = trimspace(var.ecr_repository_name) != "" ? var.ecr_repository_name : var.project
 }
 
 resource "aws_s3_bucket" "static" {
