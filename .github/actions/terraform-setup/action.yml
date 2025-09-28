@@ -81,9 +81,6 @@ runs:
     - name: Terraform plan
       if: ${{ inputs.run-plan == 'true' }}
       working-directory: ${{ inputs.working-directory }}
-      env:
-        TF_VAR_environment: ${{ inputs.environment }}
-        TF_VAR_short_environment: ${{ inputs.environment }}
       run: |
         set -euo pipefail
         terraform plan -input=false -out="${{ inputs.plan-out }}"
@@ -94,9 +91,6 @@ runs:
     - name: Terraform apply (optional)
       if: ${{ inputs.run-apply == 'true' }}
       working-directory: ${{ inputs.working-directory }}
-      env:
-        TF_VAR_environment: ${{ inputs.environment }}
-        TF_VAR_short_environment: ${{ inputs.environment }}
       run: |
         set -euo pipefail
         terraform apply -input=false -auto-approve "${{ inputs.plan-out }}"

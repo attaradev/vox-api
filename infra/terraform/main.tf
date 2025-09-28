@@ -43,9 +43,29 @@ resource "aws_iam_policy" "ecs_ssm_read" {
       ] : []
     )
   })
+
 }
 
 # The ecs_ssm_read policy will be merged into the main ecs_task_role_policy_map below
+
+# Compute a canonical short environment name (prod/stg/dev/qa, etc.). Prefer a mapping
+# from the long `var.environment` value; fall back to the explicit `var.short_environment`.
+locals {
+  short_environment = lookup(
+    {
+      production  = "prod"
+      prod        = "prod"
+      staging     = "stg"
+      stage       = "stg"
+      stg         = "stg"
+      development = "dev"
+      dev         = "dev"
+      qa          = "qa"
+    },
+    lower(trimspace(var.environment)),
+    var.short_environment
+  )
+}
 
 provider "aws" {
   region = var.aws_region
@@ -54,7 +74,7 @@ provider "aws" {
     tags = merge(
       {
         Project     = var.project
-        Environment = var.short_environment
+        Environment = var.environment
       },
       var.additional_tags
     )
@@ -88,11 +108,11 @@ locals {
       value = value
     }
   ]
-  name_prefix = lower(replace("${var.project}-${var.short_environment}", "_", "-"))
+  name_prefix = lower(replace("${var.project}-${local.short_environment}", "_", "-"))
   tags = merge(
     {
       Project     = var.project
-      Environment = var.short_environment
+      Environment = var.environment
       ManagedBy   = "terraform"
     },
     var.additional_tags
@@ -192,7 +212,9 @@ module "storage" {
   db_subnet_group_name    = module.network.db_subnet_group_name
   redis_subnet_group_name = module.network.redis_subnet_group_name
 
-  redis_auth_token = random_password.redis.result
+  redis_auth_token       = random_password.redis.result
+  bucket_suffix_override = var.bucket_suffix_override
+  bucket_suffix_length   = var.bucket_suffix_length
 }
 
 # -----------------------------------------------------------------------------

@@ -58,13 +58,13 @@ resource "aws_security_group" "alb" {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.alb_allowed_cidrs
   }
   ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.alb_allowed_cidrs
   }
   egress {
     from_port   = 0
@@ -271,7 +271,7 @@ resource "aws_route_table_association" "private_data" {
 
 # Subnet groups for database and elasticache
 resource "aws_db_subnet_group" "this" {
-  name       = "${var.name_prefix}-db-subnet-group"
+  name       = "${var.name_prefix}-db-subnet-group-${substr(md5(var.name_prefix), 0, 8)}"
   subnet_ids = [for s in aws_subnet.private_data : s.id]
 
   tags = merge(var.tags, {
@@ -280,7 +280,7 @@ resource "aws_db_subnet_group" "this" {
 }
 
 resource "aws_elasticache_subnet_group" "this" {
-  name       = "${var.name_prefix}-redis-subnet-group"
+  name       = "${var.name_prefix}-redis-subnet-group-${substr(md5(var.name_prefix), 0, 8)}"
   subnet_ids = [for s in aws_subnet.private_data : s.id]
 
   tags = merge(var.tags, {

@@ -192,3 +192,15 @@ variable "ssm_parameter_kms_key_arn" {
   type        = string
   default     = ""
 }
+
+variable "bucket_suffix_override" {
+  description = "Optional override for the bucket suffix (useful for migrations or reproducible names)"
+  type        = string
+  default     = ""
+}
+
+variable "bucket_suffix_length" {
+  description = "Number of hex chars to use from the md5-derived suffix"
+  type        = number
+  default     = 8
+}

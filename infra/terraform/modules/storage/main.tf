@@ -1,7 +1,12 @@
 locals {
-  static_bucket_name  = lower(replace("${var.name_prefix}-static", "_", "-"))
-  media_bucket_name   = lower(replace("${var.name_prefix}-media", "_", "-"))
-  alb_logs_bucketname = lower(replace("${var.name_prefix}-alb-logs", "_", "-"))
+  # short suffix to avoid global name collisions for S3 buckets
+  # deterministic suffix derived from name_prefix so it's stable per environment/account
+  computed_suffix = substr(md5(var.name_prefix), 0, var.bucket_suffix_length)
+  bucket_suffix   = var.bucket_suffix_override != "" ? var.bucket_suffix_override : local.computed_suffix
+
+  static_bucket_name  = lower(replace("${var.name_prefix}-static-${local.bucket_suffix}", "_", "-"))
+  media_bucket_name   = lower(replace("${var.name_prefix}-media-${local.bucket_suffix}", "_", "-"))
+  alb_logs_bucketname = lower(replace("${var.name_prefix}-alb-logs-${local.bucket_suffix}", "_", "-"))
 
   lifecycle_policy = trimspace(var.ecr_lifecycle_policy_json) != "" ? var.ecr_lifecycle_policy_json : jsonencode({
     rules = [

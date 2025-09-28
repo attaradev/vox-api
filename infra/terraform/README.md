@@ -178,6 +178,51 @@ Add new modules under `modules/` and wire them in via the root `main.tf`. Follow
 
 See `variables.tf` for the complete list of tunables.
 
+## ALB & ECS networking
+
+The stack places the Application Load Balancer (ALB) in the public subnets and all ECS tasks (Fargate) in private subnets. This keeps the data plane private while allowing the ALB to accept internet traffic only from approved CIDRs.
+
+Key wiring rules implemented in the modules:
+
+- The `networking` module exposes `public_subnet_ids`, `private_app_subnet_ids`, and `private_data_subnet_ids`. Use `public_subnet_ids` for ALB subnets and `private_app_subnet_ids` for ECS services.
+- The `alb` (or `modules/ecs` where ALB is created) security group ingress is controlled by the `alb_allowed_cidrs` variable. Do not hardcode `0.0.0.0/0` unless explicitly intended.
+- ECS services use `network_configuration` with `subnets = module.networking.private_app_subnet_ids` and `assign_public_ip = false` (no public IPs for tasks).
+- ALB target groups use the VPC ID from `module.networking.vpc_id` so the ALB and ECS targets are placed in the same VPC.
+
+Recommended `terraform.tfvars` examples for `alb_allowed_cidrs`:
+
+Restrict to your corporate office ranges (example):
+
+```hcl
+alb_allowed_cidrs = ["203.0.113.0/24", "198.51.100.0/24"]
+```
+
+Allow only Cloudflare (example list - confirm current IPs):
+
+```hcl
+alb_allowed_cidrs = [
+   "173.245.48.0/20",
+   "103.21.244.0/22",
+   "103.22.200.0/22",
+   # Add the rest of Cloudflare's edge ranges (verify upstream)
+]
+```
+
+Open to the public (NOT recommended for production APIs unless protected by WAF/rate-limiting):
+
+```hcl
+alb_allowed_cidrs = ["0.0.0.0/0", "::/0"]
+```
+
+Notes & guidance:
+
+- When you lock down `alb_allowed_cidrs`, you must ensure any health check or monitoring endpoints (e.g., external uptime checks, synthetic monitoring) are covered by the allowed CIDRs or have a different access path (e.g., private monitoring agents inside the VPC).
+- If you front the ALB with CloudFront, you can lock down the ALB to CloudFront IP ranges or to CloudFront's custom headers and WAF rules.
+- The ALB security group is created with an egress rule allowing outbound traffic to the private subnets so ECS tasks can respond to inbound requests.
+- Confirm `module.networking` outputs (`alb_security_group_id`, `ecs_security_group_id`, `public_subnet_ids`, `private_app_subnet_ids`) are wired into `module.ecs` and any module creating the ALB.
+
+If you want to adopt an existing ALB or reuse an existing security group, add the appropriate variables in `terraform.tfvars` to provide `alb_security_group_id` or set an `adopt_existing_alb = true` flag and provide the expected names/ids. Adopting existing network resources requires validating they live in the same VPC and that the subnet lists align.
+
 ## SES Email Configuration
 
 The infrastructure includes optional Amazon SES setup for transactional email:

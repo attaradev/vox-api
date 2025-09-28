@@ -146,6 +146,18 @@ variable "s3_versioning_enabled" {
   default     = true
 }
 
+variable "bucket_suffix_override" {
+  description = "Optional override for deterministic bucket suffix used by storage module"
+  type        = string
+  default     = ""
+}
+
+variable "bucket_suffix_length" {
+  description = "Number of hex chars to use from the md5-derived suffix when bucket_suffix_override is not provided"
+  type        = number
+  default     = 8
+}
+
 variable "create_alb_log_bucket" {
   description = "Create a dedicated S3 bucket for ALB access logs"
   type        = bool
