@@ -96,23 +96,17 @@ jobs:
       ecr_repository_url: ${{ steps.outs.outputs.ecr_repository_url }}
       ecr_repository_name: ${{ steps.outs.outputs.ecr_repository_name }}
       django_secret_key_ssm_name: ${{ steps.outs.outputs.django_secret_key_ssm_name }}
-      database_url: ${{ steps.outs.outputs.database_url }}
       database_url_ssm_name: ${{ steps.outs.outputs.database_url_ssm_name }}
       postgres_db: ${{ steps.outs.outputs.postgres_db }}
       postgres_user: ${{ steps.outs.outputs.postgres_user }}
-      postgres_password: ${{ steps.outs.outputs.postgres_password }}
       postgres_host: ${{ steps.outs.outputs.postgres_host }}
       postgres_port: ${{ steps.outs.outputs.postgres_port }}
       redis_url: ${{ steps.outs.outputs.redis_url }}
       redis_reader_url: ${{ steps.outs.outputs.redis_reader_url }}
-      redis_auth_token: ${{ steps.outs.outputs.redis_auth_token }}
       redis_primary_endpoint: ${{ steps.outs.outputs.redis_primary_endpoint }}
       static_bucket_name: ${{ steps.outs.outputs.static_bucket_name }}
       media_bucket_name: ${{ steps.outs.outputs.media_bucket_name }}
-      stripe_secret_key: ${{ steps.outs.outputs.stripe_secret_key }}
-      stripe_webhook_secret: ${{ steps.outs.outputs.stripe_webhook_secret }}
       ses_smtp_username: ${{ steps.outs.outputs.ses_smtp_username }}
-      ses_smtp_password: ${{ steps.outs.outputs.ses_smtp_password }}
       application_environment: ${{ steps.outs.outputs.application_environment }}
     steps:
       - uses: actions/checkout@v4
@@ -149,11 +143,12 @@ jobs:
             exit 1
           fi
           eo(){ terraform output -raw "$1" 2>/dev/null || true; }
+          # Publish only non-sensitive outputs. Do NOT emit raw secrets (passwords, tokens) to $GITHUB_OUTPUT.
           for k in ecs_cluster_name ecs_service_name ecs_task_family celery_service_name celery_task_family \
                    ecr_repository_url ecr_repository_name \
-                   django_secret_key_ssm_name database_url database_url_ssm_name postgres_db postgres_user postgres_password postgres_host postgres_port \
-                   redis_url redis_reader_url redis_auth_token redis_primary_endpoint static_bucket_name media_bucket_name stripe_secret_key stripe_webhook_secret \
-                   ses_smtp_username ses_smtp_password
+                   django_secret_key_ssm_name database_url_ssm_name postgres_db postgres_user postgres_host postgres_port \
+                   redis_url redis_reader_url redis_primary_endpoint static_bucket_name media_bucket_name \
+                   ses_smtp_username
           do
             v="$(eo "$k")"; echo "$k=$v" >> "$GITHUB_OUTPUT"
           done
@@ -275,7 +270,7 @@ jobs:
           EMAIL_HOST_USER="${{ github.event.inputs.email_host_user }}"
           EMAIL_HOST_PASSWORD="${{ github.event.inputs.email_host_password }}"
           SES_USERNAME="${{ needs.get_terraform_outputs.outputs.ses_smtp_username }}"
-          SES_PASSWORD="${{ needs.get_terraform_outputs.outputs.ses_smtp_password }}"
+          SES_PASSWORD="${{ github.event.inputs.email_host_password }}"
           if [ -n "$SES_USERNAME" ] && [ -n "$SES_PASSWORD" ] && [ "$SES_USERNAME" != "null" ] && [ "$SES_PASSWORD" != "null" ]; then
             EMAIL_HOST="email-smtp.${{ env.AWS_REGION }}.amazonaws.com"
             EMAIL_PORT="587"
@@ -288,21 +283,72 @@ jobs:
           echo "email_host=$EMAIL_HOST" >> "$GITHUB_OUTPUT"
           echo "email_port=$EMAIL_PORT" >> "$GITHUB_OUTPUT"
           echo "email_host_user=$EMAIL_HOST_USER" >> "$GITHUB_OUTPUT"
-          echo "email_host_password=$EMAIL_HOST_PASSWORD" >> "$GITHUB_OUTPUT"
+
+      - name: Login to ECR
+        id: login-ecr-deploy
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Verify pushed image exists in ECR
+        id: verify-image
+        env:
+          IMAGE_TAG: ${{ needs.build_and_push_image.outputs.image_tag }}
+          ECR_URL: ${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}
+          ECR_NAME: ${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}
+          REGISTRY: ${{ steps.login-ecr-deploy.outputs.registry }}
+          PROJECT_NAME: ${{ env.PROJECT_NAME }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          if [ -z "${IMAGE_TAG:-}" ]; then
+            echo "IMAGE_TAG missing from build job outputs; cannot verify image." >&2
+            exit 1
+          fi
+
+          # Determine repository name and registry
+          if [ -n "${ECR_URL:-}" ] && [ "${ECR_URL:-}" != "null" ]; then
+            repo_name="$(basename "${ECR_URL}")"
+            registry="$(echo "${ECR_URL}" | cut -d'/' -f1)"
+          else
+            repo_name="${ECR_NAME:-}${PROJECT_NAME:-vox-api}"
+            # if ECR_NAME is empty, use PROJECT_NAME
+            if [ -z "${ECR_NAME:-}" ] || [ "${ECR_NAME:-}" = "null" ]; then
+              repo_name="${PROJECT_NAME:-vox-api}"
+            fi
+            registry="${REGISTRY:-}"
+          fi
+
+          if [ -z "${registry:-}" ] || [ -z "${repo_name:-}" ]; then
+            echo "ECR registry or repository name missing; cannot verify image." >&2
+            echo "Debug: ECR_URL='${ECR_URL}', ECR_NAME='${ECR_NAME}', REGISTRY='${REGISTRY:-}'" >&2 || true
+            exit 1
+          fi
+
+          echo "Verifying image '${repo_name}:${IMAGE_TAG}' in ECR registry '${registry}'"
+          # AWS CLI expects repository name without registry prefix
+          set +e
+          aws ecr describe-images --repository-name "${repo_name}" --image-ids imageTag="${IMAGE_TAG}" --region "${AWS_REGION}" >/dev/null 2>&1
+          rc=$?
+          set -e
+          if [ $rc -ne 0 ]; then
+            echo "Image ${repo_name}:${IMAGE_TAG} not found in ECR. Ensure the build pushed the image successfully." >&2
+            exit 1
+          fi
+          echo "Image exists in ECR: ${repo_name}:${IMAGE_TAG}"
 
       - name: Register task definitions (API & Celery) using TF outputs
         id: register_td
         env:
-          NEW_IMAGE: ${{ needs.build_and_push_image.outputs.image_uri }}
+          NEW_IMAGE: ""
+          REGISTRY: ${{ steps.login-ecr-deploy.outputs.registry }}
           ECS_TASK_FAMILY: ${{ needs.get_terraform_outputs.outputs.ecs_task_family }}
           CELERY_TASK_FAMILY: ${{ needs.get_terraform_outputs.outputs.celery_task_family }}
           BASE_ENV_JSON: ${{ needs.get_terraform_outputs.outputs.application_environment }}
-          DB_SSM_NAME: ${{ needs.get_terraform_outputs.outputs.database_url || needs.get_terraform_outputs.outputs.database_url_ssm_name || '' }}
+          DB_SSM_NAME: ${{ needs.get_terraform_outputs.outputs.database_url_ssm_name || '' }}
           DJANGO_SECRET_SSM: ${{ needs.get_terraform_outputs.outputs.django_secret_key_ssm_name || '' }}
           REDIS_ENDPOINT: ${{ needs.get_terraform_outputs.outputs.redis_primary_endpoint || '' }}
-          REDIS_AUTH_SSM: ${{ needs.get_terraform_outputs.outputs.redis_auth_token || '' }}
-          STRIPE_SECRET_SSM: ${{ needs.get_terraform_outputs.outputs.stripe_secret_key || '' }}
-          STRIPE_WEBHOOK_SSM: ${{ needs.get_terraform_outputs.outputs.stripe_webhook_secret || '' }}
+          REDIS_AUTH_SSM: ""
+          STRIPE_SECRET_SSM: ""
+          STRIPE_WEBHOOK_SSM: ""
           DJANGO_ENV: ${{ env.DEPLOY_ENV }}
           FRONTEND_URL: ${{ github.event.inputs.frontend_url }}
           DJANGO_ALLOWED_HOSTS: ${{ github.event.inputs.django_allowed_hosts }}
