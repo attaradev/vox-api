@@ -93,7 +93,6 @@ jobs:
       ecs_task_family: ${{ steps.outs.outputs.ecs_task_family }}
       celery_service_name: ${{ steps.outs.outputs.celery_service_name }}
       celery_task_family: ${{ steps.outs.outputs.celery_task_family }}
-      ecr_repository_url: ${{ steps.outs.outputs.ecr_repository_url }}
       ecr_repository_name: ${{ steps.outs.outputs.ecr_repository_name }}
       django_secret_key_ssm_name: ${{ steps.outs.outputs.django_secret_key_ssm_name }}
       database_url_ssm_name: ${{ steps.outs.outputs.database_url_ssm_name }}
@@ -145,7 +144,7 @@ jobs:
           eo(){ terraform output -raw "$1" 2>/dev/null || true; }
           # Publish only non-sensitive outputs. Do NOT emit raw secrets (passwords, tokens) to $GITHUB_OUTPUT.
           for k in ecs_cluster_name ecs_service_name ecs_task_family celery_service_name celery_task_family \
-                   ecr_repository_url ecr_repository_name \
+                   ecr_repository_name \
                    django_secret_key_ssm_name database_url_ssm_name postgres_db postgres_user postgres_host postgres_port \
                    redis_url redis_reader_url redis_primary_endpoint static_bucket_name media_bucket_name \
                    ses_smtp_username
@@ -162,6 +161,15 @@ jobs:
 
           ECR_OUT="$(eo ecr_repository_url)"
           ECR_NAME="$(eo ecr_repository_name)"
+          # Export AWS account id from terraform/STS to make ARNs possible later without exposing secrets
+          AWS_ACCOUNT_ID_TF="$(eo aws_account_id)"
+          # Fallback to STS if TF doesn't provide it
+          if [ -z "$AWS_ACCOUNT_ID_TF" ] || [ "$AWS_ACCOUNT_ID_TF" = "null" ]; then
+            AWS_ACCOUNT_ID_TF=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
+          fi
+          if [ -n "$AWS_ACCOUNT_ID_TF" ]; then
+            echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID_TF" >> "$GITHUB_OUTPUT"
+          fi
           if { [ -z "$ECR_OUT" ] || [ "$ECR_OUT" = "null" ]; } && { [ -z "$ECR_NAME" ] || [ "$ECR_NAME" = "null" ]; }; then
             echo "Error: Terraform did not output 'ecr_repository_url' or 'ecr_repository_name' for workspace '${{ env.DEPLOY_ENV }}'." >&2
             terraform output -json || true
@@ -211,8 +219,12 @@ jobs:
           full_sha="${GITHUB_SHA:-${{ github.sha }}}"
           short_sha="${full_sha:0:7}"
 
-          # Prefer full URL from Terraform
-          ecr_repo="${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}"
+          # Prefer full URL from Terraform if available via local TF state; otherwise compose from registry + repo name
+          ecr_repo=""
+          # Try to use Terraform output from workspace directory (safer than job output which may be masked)
+          if [ -d "${{ env.TF_WORKDIR }}" ]; then
+            ecr_repo=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_repository_url 2>/dev/null || true)
+          fi
 
           # Fallback: compose from login registry + TF repo name
           if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
@@ -224,20 +236,46 @@ jobs:
             fi
             if [ -z "${registry}" ]; then
               echo "ECR registry missing from login step; cannot compose repository URL." >&2
-              echo "Debug: ecr_repository_url='${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}', ecr_repository_name='${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}', registry='${REGISTRY:-}'" >&2
+              echo "Debug: ecr_repository_name='${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}', registry='${REGISTRY:-}'" >&2
               exit 1
             fi
             ecr_repo="${registry}/${repo_name}"
           fi
 
           echo "IMAGE_TAG=${short_sha}" >> "$GITHUB_OUTPUT"
-          echo "IMAGE_URI=${ecr_repo}:${short_sha}" >> "$GITHUB_OUTPUT"
 
       - name: Build & push
         env:
-          IMAGE_URI: ${{ steps.image_meta.outputs.IMAGE_URI }}
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           set -euo pipefail
+          # Reconstruct IMAGE_URI from the tag and available registry/repo info
+          short_sha="${{ steps.image_meta.outputs.IMAGE_TAG }}"
+          if [ -z "${short_sha:-}" ]; then
+            echo "IMAGE_TAG missing from image_meta step; cannot build image." >&2
+            exit 1
+          fi
+
+          ecr_repo=""
+          # Prefer TF full URL if available
+          if [ -d "${{ env.TF_WORKDIR }}" ]; then
+            ecr_repo=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_repository_url 2>/dev/null || true)
+          fi
+          if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
+            repo_name="${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}"
+            if [ -z "${repo_name}" ] || [ "${repo_name}" = "null" ]; then
+              repo_name="${PROJECT_NAME:-vox-api}"
+            fi
+            registry="${REGISTRY:-}"
+            if [ -z "${registry}" ]; then
+              echo "ECR registry missing from login step; cannot compose repository URL." >&2
+              echo "Debug: ecr_repository_name='${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}', registry='${REGISTRY:-}'" >&2
+              exit 1
+            fi
+            ecr_repo="${registry}/${repo_name}"
+          fi
+
+          IMAGE_URI="${ecr_repo}:${short_sha}"
           echo "Building ${IMAGE_URI}"
           docker build --pull --tag "${IMAGE_URI}" .
           echo "Pushing ${IMAGE_URI}"
@@ -292,7 +330,6 @@ jobs:
         id: verify-image
         env:
           IMAGE_TAG: ${{ needs.build_and_push_image.outputs.image_tag }}
-          ECR_URL: ${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}
           ECR_NAME: ${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}
           REGISTRY: ${{ steps.login-ecr-deploy.outputs.registry }}
           PROJECT_NAME: ${{ env.PROJECT_NAME }}
@@ -305,15 +342,27 @@ jobs:
           fi
 
           # Determine repository name and registry
-          if [ -n "${ECR_URL:-}" ] && [ "${ECR_URL:-}" != "null" ]; then
-            repo_name="$(basename "${ECR_URL}")"
-            registry="$(echo "${ECR_URL}" | cut -d'/' -f1)"
+          repo_name=""
+          registry=""
+
+          # Prefer using ECR_NAME (safe job output) combined with the login-provided registry
+          if [ -n "${ECR_NAME:-}" ] && [ "${ECR_NAME:-}" != "null" ]; then
+            repo_name="${ECR_NAME}"
+            registry="${REGISTRY:-}"
           else
-            repo_name="${ECR_NAME:-}${PROJECT_NAME:-vox-api}"
-            # if ECR_NAME is empty, use PROJECT_NAME
-            if [ -z "${ECR_NAME:-}" ] || [ "${ECR_NAME:-}" = "null" ]; then
-              repo_name="${PROJECT_NAME:-vox-api}"
+            # Fallback: try reading the full URL from local terraform state inside TF_WORKDIR
+            if [ -d "${{ env.TF_WORKDIR }}" ]; then
+              tf_ecr_url=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_repository_url 2>/dev/null || true)
+              if [ -n "${tf_ecr_url:-}" ] && [ "${tf_ecr_url}" != "null" ]; then
+                repo_name="$(basename "${tf_ecr_url}")"
+                registry="$(echo "${tf_ecr_url}" | cut -d'/' -f1)"
+              fi
             fi
+          fi
+
+          # Final fallback: use PROJECT_NAME as repo and the login registry
+          if [ -z "${repo_name}" ] || [ -z "${registry}" ]; then
+            repo_name="${PROJECT_NAME:-vox-api}"
             registry="${REGISTRY:-}"
           fi
 
@@ -363,14 +412,10 @@ jobs:
           if [ -z "${NEW_IMAGE:-}" ] || [ "${NEW_IMAGE:-}" = "null" ]; then
             echo "NEW_IMAGE not provided by build job; attempting to compute from available data..."
 
-            # 1) Try the TF outputs job value (may be empty if outputs job didn't populate it)
-            ecr_repo="${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}"
-
-            # 2) If empty, try reading from terraform state directly (infra dir)
-            if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
-              if [ -d "${{ env.TF_WORKDIR }}" ]; then
-                ecr_repo=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_repository_url 2>/dev/null || true)
-              fi
+            # 1) Try reading the full URL from local terraform state (safer than job output which may be masked)
+            ecr_repo=""
+            if [ -d "${{ env.TF_WORKDIR }}" ]; then
+              ecr_repo=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_repository_url 2>/dev/null || true)
             fi
 
             # 3) If still empty, try composing registry + repo name (repo name fallback to PROJECT_NAME)
@@ -407,7 +452,14 @@ jobs:
           fi
 
           make_env_json() {
-            local base_json="${BASE_ENV_JSON:-{}}"
+            # Ensure BASE_ENV_JSON is valid JSON; if not, fallback to empty object
+            local base_json_raw="${BASE_ENV_JSON:-}"
+            if [ -z "${base_json_raw}" ] || [ "${base_json_raw}" = "null" ]; then
+              base_json='{}'
+            else
+              # try to compact/validate; if invalid, use {}
+              base_json=$(printf '%s' "${base_json_raw}" | jq -c '.' 2>/dev/null || echo '{}')
+            fi
             jq -n \
               --argjson base "$base_json" \
               --arg DJANGO_ENV           "${DJANGO_ENV}" \
@@ -433,6 +485,13 @@ jobs:
             local family="$1" name="$2" file="$3"
             [ -n "$family" ] || { echo "Missing task family for $name" >&2; exit 1; }
             aws ecs describe-task-definition --task-definition "$family" --query 'taskDefinition' > "$file.json"
+            # Ensure AWS_ACCOUNT_ID is available for ARN construction; try env then STS
+            if [ -z "${AWS_ACCOUNT_ID:-}" ] || [ "${AWS_ACCOUNT_ID:-}" = "null" ]; then
+              AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
+            fi
+            if [ -z "${AWS_ACCOUNT_ID:-}" ] || [ "${AWS_ACCOUNT_ID:-}" = "null" ]; then
+              echo "Warning: AWS_ACCOUNT_ID not available; secret ARNs may not be constructible" >&2
+            fi
             env_json="$(make_env_json)"
 
             secrets_json="[]"
