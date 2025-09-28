@@ -42,6 +42,9 @@ runs:
       run: |
         set -euo pipefail
         echo "TF_VAR_environment=${{ inputs.environment }}" >> "$GITHUB_ENV"
+        echo "TF_VAR_short_environment=${{ inputs.environment }}" >> "$GITHUB_ENV"
+        echo "TF_VAR_aws_region=${{ inputs.aws-region }}" >> "$GITHUB_ENV"
+        echo "TF_VAR_project=${{ env.PROJECT_NAME }}" >> "$GITHUB_ENV"
         echo "TF_VAR_additional_tags={\"DeployedBy\":\"GitHubActions\",\"Workflow\":\"${GITHUB_WORKFLOW}\",\"RunId\":\"${GITHUB_RUN_ID}\",\"CommitSHA\":\"${GITHUB_SHA}\"}" >> "$GITHUB_ENV"
       shell: bash
 
@@ -67,6 +70,9 @@ runs:
     - name: Terraform plan
       if: ${{ inputs.run-plan == 'true' }}
       working-directory: ${{ inputs.working-directory }}
+      env:
+        TF_VAR_environment: ${{ inputs.environment }}
+        TF_VAR_short_environment: ${{ inputs.environment }}
       run: |
         set -euo pipefail
         terraform plan -input=false -out="${{ inputs.plan-out }}"
@@ -77,6 +83,9 @@ runs:
     - name: Terraform apply (optional)
       if: ${{ inputs.run-apply == 'true' }}
       working-directory: ${{ inputs.working-directory }}
+      env:
+        TF_VAR_environment: ${{ inputs.environment }}
+        TF_VAR_short_environment: ${{ inputs.environment }}
       run: |
         set -euo pipefail
         terraform apply -input=false -auto-approve "${{ inputs.plan-out }}"
