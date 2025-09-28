@@ -241,8 +241,9 @@ resource "aws_db_instance" "postgres" {
   # Use networking module output for RDS security group
   vpc_security_group_ids = [var.db_security_group_id]
   db_subnet_group_name   = var.db_subnet_group_name
-  # RDS instance identifier follows the name_prefix by default to ensure predictable names.
-  identifier = var.db_instance_identifier != "" ? var.db_instance_identifier : lower(replace(var.name_prefix, "_", "-"))
+  # RDS instance identifier follows the name_prefix to ensure predictable names.
+  # Always derive deterministically from name_prefix (lowercased, underscores -> hyphens).
+  identifier = lower(replace(var.name_prefix, "_", "-"))
   tags       = var.tags
 }
 

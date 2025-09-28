@@ -56,7 +56,6 @@ runs:
         echo "TF_VAR_short_environment=${SHORT_ENV}" >> "$GITHUB_ENV"
         echo "TF_VAR_aws_region=${{ inputs.aws-region }}" >> "$GITHUB_ENV"
         echo "TF_VAR_project=${{ env.PROJECT_NAME }}" >> "$GITHUB_ENV"
-        echo "TF_VAR_additional_tags={\"DeployedBy\":\"GitHubActions\",\"Workflow\":\"${GITHUB_WORKFLOW}\",\"RunId\":\"${GITHUB_RUN_ID}\",\"CommitSHA\":\"${GITHUB_SHA}\"}" >> "$GITHUB_ENV"
       shell: bash
 
     - name: Terraform Init (with backend)

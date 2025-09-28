@@ -83,12 +83,6 @@ variable "db_name" {
   default     = ""
 }
 
-variable "db_instance_identifier" {
-  description = "Optional explicit RDS instance identifier. If empty, one will be derived from name_prefix."
-  type        = string
-  default     = ""
-}
-
 variable "db_username" {
   description = "Username for the Postgres database"
   type        = string
