@@ -554,6 +554,15 @@ jobs:
               add_secret "STRIPE_WEBHOOK_SECRET" "$S_WEB_VALFROM"
             fi
 
+            # Remove any environment variables that collide with secret names (AWS requires secret names be unique
+            # and not present as environment variables on the same container).
+            # env_json is an array of {name, value}; secrets_json is an array of {name, valueFrom}.
+            if [ -n "${env_json:-}" ]; then
+              env_json=$(jq -c --argjson env "$env_json" --argjson secrets "$secrets_json" '
+                ($env // []) | map(select((.name as $n) | ($secrets | map(.name) | index($n) | not)))
+              ' <<<"$env_json")
+            fi
+
             jq --arg img "${NEW_IMAGE}" --argjson env "$env_json" --argjson secrets "$secrets_json" \
               '.containerDefinitions[0].image = $img
                | .containerDefinitions[0].environment = $env
