@@ -227,9 +227,10 @@ resource "aws_db_instance" "postgres" {
   engine            = "postgres"
   engine_version    = var.db_engine_version != "" ? var.db_engine_version : null
   instance_class    = var.db_instance_class
-  db_name           = var.db_name
-  username          = var.db_username
-  password          = var.db_password
+  # Use the provided db_name or derive one from the name_prefix to follow the project's naming pattern.
+  db_name  = var.db_name != "" ? var.db_name : lower(replace(var.name_prefix, "_", "-"))
+  username = var.db_username
+  password = var.db_password
   # Use the parameter group only when explicitly provided. Leaving this null lets AWS use
   # the default parameter group for the engine/version in the region.
   parameter_group_name      = var.db_parameter_group_name != "" ? var.db_parameter_group_name : null
@@ -239,7 +240,9 @@ resource "aws_db_instance" "postgres" {
   # Use networking module output for RDS security group
   vpc_security_group_ids = [var.db_security_group_id]
   db_subnet_group_name   = var.db_subnet_group_name
-  tags                   = var.tags
+  # RDS instance identifier follows the name_prefix by default to ensure predictable names.
+  identifier = var.db_instance_identifier != "" ? var.db_instance_identifier : lower(replace(var.name_prefix, "_", "-"))
+  tags       = var.tags
 }
 
 # ------------------------------------------------------------------------

@@ -77,8 +77,15 @@ variable "redis_automatic_failover_enabled" {
   default     = false
 }
 variable "db_name" {
-  description = "Name of the Postgres database"
+  description = "Name of the Postgres database. If empty, a name derived from name_prefix will be used."
   type        = string
+  default     = ""
+}
+
+variable "db_instance_identifier" {
+  description = "Optional explicit RDS instance identifier. If empty, one will be derived from name_prefix."
+  type        = string
+  default     = ""
 }
 
 variable "db_username" {

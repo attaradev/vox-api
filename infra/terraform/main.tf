@@ -228,7 +228,7 @@ module "ecs" {
   cpu         = var.ecs_cpu
   memory      = var.ecs_memory
   # execution_role_arn left blank to use module's created execution role or an explicit override
-  container_image           = var.container_image
+  container_image           = trimspace(var.container_image) != "" ? var.container_image : "${module.storage.ecr_repository_url}:latest"
   environment               = local.ecs_environment
   aws_region                = var.aws_region
   ecs_log_group_name        = local.ecs_log_group_name != null ? local.ecs_log_group_name : "${local.name_prefix}-ecs-logs"
