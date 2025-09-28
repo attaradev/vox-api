@@ -7,30 +7,6 @@ on:
         description: "Deployment environment (e.g., production, staging)"
         required: false
         default: production
-      frontend_url:
-        description: "Frontend base URL for password reset links"
-        required: false
-        default: "https://your-frontend"
-      email_host:
-        description: "SMTP host for email (ignored if SES SMTP is enabled)"
-        required: false
-        default: "smtp.gmail.com"
-      email_port:
-        description: "SMTP port for email (ignored if SES SMTP is enabled)"
-        required: false
-        default: "587"
-      email_host_user:
-        description: "SMTP username (ignored if SES SMTP is enabled)"
-        required: false
-        default: ""
-      email_host_password:
-        description: "SMTP password (ignored if SES SMTP is enabled)"
-        required: false
-        default: ""
-      django_allowed_hosts:
-        description: "Comma-separated list of allowed hosts"
-        required: false
-        default: "localhost,127.0.0.1"
       auto_apply:
         description: "If true, run 'terraform apply' after planning"
         required: false
@@ -61,7 +37,9 @@ jobs:
       TF_VAR_short_environment: ${{ github.event.inputs.environment || 'production' }}
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 1, persist-credentials: false }
+        with:
+          fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/aws-setup
         with:
@@ -78,125 +56,18 @@ jobs:
           run-plan: "true"
           run-apply: ${{ github.event.inputs.auto_apply || 'false' }}
 
-  get_terraform_outputs:
-    name: Get Terraform Outputs
-    runs-on: ubuntu-latest
-    permissions: { id-token: write, contents: read }
-    env:
-      DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
-      TF_VAR_environment: ${{ github.event.inputs.environment || 'production' }}
-      TF_VAR_short_environment: ${{ github.event.inputs.environment || 'production' }}
-    needs: [terraform]
-    outputs:
-      ecs_cluster_name: ${{ steps.outs.outputs.ecs_cluster_name }}
-      ecs_service_name: ${{ steps.outs.outputs.ecs_service_name }}
-      ecs_task_family: ${{ steps.outs.outputs.ecs_task_family }}
-      celery_service_name: ${{ steps.outs.outputs.celery_service_name }}
-      celery_task_family: ${{ steps.outs.outputs.celery_task_family }}
-      ecr_repository_name: ${{ steps.outs.outputs.ecr_repository_name }}
-      django_secret_key_ssm_name: ${{ steps.outs.outputs.django_secret_key_ssm_name }}
-      database_url_ssm_name: ${{ steps.outs.outputs.database_url_ssm_name }}
-      postgres_db: ${{ steps.outs.outputs.postgres_db }}
-      postgres_user: ${{ steps.outs.outputs.postgres_user }}
-      postgres_host: ${{ steps.outs.outputs.postgres_host }}
-      postgres_port: ${{ steps.outs.outputs.postgres_port }}
-      redis_url: ${{ steps.outs.outputs.redis_url }}
-      redis_reader_url: ${{ steps.outs.outputs.redis_reader_url }}
-      redis_primary_endpoint: ${{ steps.outs.outputs.redis_primary_endpoint }}
-      static_bucket_name: ${{ steps.outs.outputs.static_bucket_name }}
-      media_bucket_name: ${{ steps.outs.outputs.media_bucket_name }}
-      ses_smtp_username: ${{ steps.outs.outputs.ses_smtp_username }}
-      application_environment: ${{ steps.outs.outputs.application_environment }}
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 1, persist-credentials: false }
-
-      - uses: ./.github/actions/aws-setup
-        with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - uses: ./.github/actions/terraform-setup
-        with:
-          working-directory: ${{ env.TF_WORKDIR }}
-          state-bucket: ${{ env.TF_STATE_BUCKET }}
-          backend-key: state/${{ env.DEPLOY_ENV }}/terraform.tfstate
-          environment: ${{ env.DEPLOY_ENV }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Select Workspace
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: |
-          set -euo pipefail
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
-          echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> "$GITHUB_ENV"
-          terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null || terraform workspace new "${{ env.DEPLOY_ENV }}"
-
-      - name: Get Terraform outputs
-        id: outs
-        working-directory: ${{ env.TF_WORKDIR }}
-        run: |
-          set -euo pipefail
-          if ! terraform state list >/dev/null 2>&1; then
-            echo "Error: No Terraform state found. Please run the infrastructure workflow first."
-            exit 1
-          fi
-          eo(){ terraform output -raw "$1" 2>/dev/null || true; }
-          # Publish only non-sensitive outputs. Do NOT emit raw secrets (passwords, tokens) to $GITHUB_OUTPUT.
-          for k in ecs_cluster_name ecs_service_name ecs_task_family celery_service_name celery_task_family \
-                   ecr_repository_name \
-                   django_secret_key_ssm_name database_url_ssm_name postgres_db postgres_user postgres_host postgres_port \
-                   redis_url redis_reader_url redis_primary_endpoint static_bucket_name media_bucket_name \
-                   ses_smtp_username
-          do
-            v="$(eo "$k")"; echo "$k=$v" >> "$GITHUB_OUTPUT"
-          done
-
-          if app_env_json=$(terraform output -json application_environment 2>/dev/null); then
-            comp="$(echo "$app_env_json" | jq -c '.')"
-            echo "application_environment=$comp" >> "$GITHUB_OUTPUT"
-          else
-            echo "application_environment={}" >> "$GITHUB_OUTPUT"
-          fi
-
-          ECR_OUT="$(eo ecr_repository_url)"
-          ECR_NAME="$(eo ecr_repository_name)"
-          # Export AWS account id from terraform/STS to make ARNs possible later without exposing secrets
-          AWS_ACCOUNT_ID_TF="$(eo aws_account_id)"
-          # Fallback to STS if TF doesn't provide it
-          if [ -z "$AWS_ACCOUNT_ID_TF" ] || [ "$AWS_ACCOUNT_ID_TF" = "null" ]; then
-            AWS_ACCOUNT_ID_TF=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
-          fi
-          if [ -n "$AWS_ACCOUNT_ID_TF" ]; then
-            echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID_TF" >> "$GITHUB_OUTPUT"
-          fi
-          if { [ -z "$ECR_OUT" ] || [ "$ECR_OUT" = "null" ]; } && { [ -z "$ECR_NAME" ] || [ "$ECR_NAME" = "null" ]; }; then
-            echo "Error: Terraform did not output 'ecr_repository_url' or 'ecr_repository_name' for workspace '${{ env.DEPLOY_ENV }}'." >&2
-            terraform output -json || true
-            exit 1
-          fi
-
-      - name: Validate required Terraform outputs
-        run: |
-          set -euo pipefail
-          missing=()
-          [ -z "${{ steps.outs.outputs.ecs_task_family }}" ] && missing+=(ecs_task_family)
-          [ -z "${{ steps.outs.outputs.ecs_cluster_name }}" ] && missing+=(ecs_cluster_name)
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "Missing required Terraform outputs: ${missing[*]}" >&2
-            exit 1
-          fi
-
   build_and_push_image:
     name: Build & Push Image
     runs-on: ubuntu-latest
-    needs: [get_terraform_outputs]
+    needs: [terraform]
     permissions: { id-token: write, contents: read }
     outputs:
       image_tag: ${{ steps.image_meta.outputs.IMAGE_TAG }}
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 1, persist-credentials: false }
+        with:
+          fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/aws-setup
         with:
@@ -210,6 +81,32 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - uses: ./.github/actions/terraform-setup
+        with:
+          working-directory: ${{ env.TF_WORKDIR }}
+          state-bucket: ${{ env.TF_STATE_BUCKET }}
+          backend-key: state/${{ env.DEPLOY_ENV }}/terraform.tfstate
+          environment: ${{ env.DEPLOY_ENV }}
+          aws-region: ${{ env.AWS_REGION }}
+          run-plan: "false"
+          run-apply: "false"
+
+      - name: Select workspace
+        working-directory: ${{ env.TF_WORKDIR }}
+        run: |
+          set -euo pipefail
+          terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null || terraform workspace new "${{ env.DEPLOY_ENV }}"
+
+      - name: Read ECR repository name
+        working-directory: ${{ env.TF_WORKDIR }}
+        run: |
+          set -euo pipefail
+          repo=$(terraform output -raw ecr_repository_name 2>/dev/null || true)
+          if [ -z "${repo}" ] || [ "${repo}" = "null" ]; then
+            repo="${PROJECT_NAME:-vox-api}"
+          fi
+          echo "ECR_REPOSITORY_NAME=${repo}" >> "$GITHUB_ENV"
+
       - name: Determine image metadata
         id: image_meta
         env:
@@ -218,392 +115,66 @@ jobs:
           set -euo pipefail
           full_sha="${GITHUB_SHA:-${{ github.sha }}}"
           short_sha="${full_sha:0:7}"
-
-          # Prefer full URL from Terraform if available via local TF state; otherwise compose from registry + repo name
-          ecr_repo=""
-          # Try to use Terraform output from workspace directory (safer than job output which may be masked)
-          if [ -d "${{ env.TF_WORKDIR }}" ]; then
-            ecr_repo=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_repository_url 2>/dev/null || true)
-          fi
-
-          # Fallback: compose from login registry + TF repo name
-          if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
-            repo_name="${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}"
-            registry="${REGISTRY:-}"
-            # If TF does not expose ecr_repository_name, default to PROJECT_NAME (matches storage module behavior)
-            if [ -z "${repo_name}" ] || [ "${repo_name}" = "null" ]; then
-              repo_name="${PROJECT_NAME:-vox-api}"
-            fi
-            if [ -z "${registry}" ]; then
-              echo "ECR registry missing from login step; cannot compose repository URL." >&2
-              echo "Debug: ecr_repository_name='${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}', registry='${REGISTRY:-}'" >&2
-              exit 1
-            fi
-            ecr_repo="${registry}/${repo_name}"
-          fi
-
           echo "IMAGE_TAG=${short_sha}" >> "$GITHUB_OUTPUT"
-
-      - name: Build & push
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        run: |
-          set -euo pipefail
-          # Reconstruct IMAGE_URI from the tag and available registry/repo info
-          short_sha="${{ steps.image_meta.outputs.IMAGE_TAG }}"
-          if [ -z "${short_sha:-}" ]; then
-            echo "IMAGE_TAG missing from image_meta step; cannot build image." >&2
+          if [ -z "${REGISTRY}" ]; then
+            echo "ECR registry missing from login step; cannot compose repository URL." >&2
             exit 1
           fi
-
-          ecr_repo=""
-          # Prefer TF full URL if available
-          if [ -d "${{ env.TF_WORKDIR }}" ]; then
-            ecr_repo=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_repository_url 2>/dev/null || true)
+          name="${ECR_REPOSITORY_NAME}"
+          if [ -z "$name" ] || [ "$name" = "null" ]; then
+            name="${PROJECT_NAME:-vox-api}"
           fi
-          if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
-            repo_name="${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}"
-            if [ -z "${repo_name}" ] || [ "${repo_name}" = "null" ]; then
-              repo_name="${PROJECT_NAME:-vox-api}"
-            fi
-            registry="${REGISTRY:-}"
-            if [ -z "${registry}" ]; then
-              echo "ECR registry missing from login step; cannot compose repository URL." >&2
-              echo "Debug: ecr_repository_name='${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}', registry='${REGISTRY:-}'" >&2
-              exit 1
-            fi
-            ecr_repo="${registry}/${repo_name}"
-          fi
+          echo "IMAGE_URI=${REGISTRY}/${name}:${short_sha}" >> "$GITHUB_ENV"
 
-          IMAGE_URI="${ecr_repo}:${short_sha}"
-          echo "Building ${IMAGE_URI}"
+      - name: Build & push
+        run: |
+          set -euo pipefail
+          if [ -z "${IMAGE_URI:-}" ]; then
+            echo "IMAGE_URI missing" >&2
+            exit 1
+          fi
           docker build --pull --tag "${IMAGE_URI}" .
-          echo "Pushing ${IMAGE_URI}"
           docker push "${IMAGE_URI}"
 
-  deploy_ecs:
-    name: Deploy to ECS
+  apply_image_tag:
+    name: Apply image_tag to Terraform (register new task def)
     runs-on: ubuntu-latest
-    needs: [get_terraform_outputs, build_and_push_image]
     environment: ${{ github.event.inputs.environment || 'production' }}
+    needs: [terraform, build_and_push_image]
+    outputs:
+      image_tag: ${{ steps.set_outputs.outputs.IMAGE_TAG }}
     permissions: { id-token: write, contents: read }
+    env:
+      DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
+      TF_WORKDIR: infra/terraform
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 1, persist-credentials: false }
+        with:
+          fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/aws-setup
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install jq
-        run: sudo apt-get update -y && sudo apt-get install -y jq
+      - name: Set IMAGE_TAG env from build job
+        run: |
+          echo "IMAGE_TAG=${{ needs.build_and_push_image.outputs.image_tag }}" >> "$GITHUB_ENV"
 
-      - name: Determine email configuration
-        id: email_config
+      - name: Select workspace and apply image_tag
+        working-directory: infra/terraform
         run: |
           set -euo pipefail
-          EMAIL_HOST="${{ github.event.inputs.email_host }}"
-          EMAIL_PORT="${{ github.event.inputs.email_port }}"
-          EMAIL_HOST_USER="${{ github.event.inputs.email_host_user }}"
-          EMAIL_HOST_PASSWORD="${{ github.event.inputs.email_host_password }}"
-          SES_USERNAME="${{ needs.get_terraform_outputs.outputs.ses_smtp_username }}"
-          SES_PASSWORD="${{ github.event.inputs.email_host_password }}"
-          if [ -n "$SES_USERNAME" ] && [ -n "$SES_PASSWORD" ] && [ "$SES_USERNAME" != "null" ] && [ "$SES_PASSWORD" != "null" ]; then
-            EMAIL_HOST="email-smtp.${{ env.AWS_REGION }}.amazonaws.com"
-            EMAIL_PORT="587"
-            EMAIL_HOST_USER="$SES_USERNAME"
-            EMAIL_HOST_PASSWORD="$SES_PASSWORD"
-            echo "Using SES SMTP credentials for email"
-          else
-            echo "Using user-provided email settings"
-          fi
-          echo "email_host=$EMAIL_HOST" >> "$GITHUB_OUTPUT"
-          echo "email_port=$EMAIL_PORT" >> "$GITHUB_OUTPUT"
-          echo "email_host_user=$EMAIL_HOST_USER" >> "$GITHUB_OUTPUT"
-
-      - name: Login to ECR
-        id: login-ecr-deploy
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Verify pushed image exists in ECR
-        id: verify-image
-        env:
-          IMAGE_TAG: ${{ needs.build_and_push_image.outputs.image_tag }}
-          ECR_NAME: ${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}
-          REGISTRY: ${{ steps.login-ecr-deploy.outputs.registry }}
-          PROJECT_NAME: ${{ env.PROJECT_NAME }}
-          AWS_REGION: ${{ env.AWS_REGION }}
-        run: |
-          set -euo pipefail
+          terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null || terraform workspace new "${{ env.DEPLOY_ENV }}"
           if [ -z "${IMAGE_TAG:-}" ]; then
-            echo "IMAGE_TAG missing from build job outputs; cannot verify image." >&2
+            echo "No image tag found from build job" >&2
             exit 1
           fi
+          terraform init -input=false
+          terraform apply -var "image_tag=${IMAGE_TAG}" -auto-approve
 
-          # Determine repository name and registry
-          repo_name=""
-          registry=""
-
-          # Prefer using ECR_NAME (safe job output) combined with the login-provided registry
-          if [ -n "${ECR_NAME:-}" ] && [ "${ECR_NAME:-}" != "null" ]; then
-            repo_name="${ECR_NAME}"
-            registry="${REGISTRY:-}"
-          else
-            # Fallback: try reading the full URL from local terraform state inside TF_WORKDIR
-            if [ -d "${{ env.TF_WORKDIR }}" ]; then
-              tf_ecr_url=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_repository_url 2>/dev/null || true)
-              if [ -n "${tf_ecr_url:-}" ] && [ "${tf_ecr_url}" != "null" ]; then
-                repo_name="$(basename "${tf_ecr_url}")"
-                registry="$(echo "${tf_ecr_url}" | cut -d'/' -f1)"
-              fi
-            fi
-          fi
-
-          # Final fallback: use PROJECT_NAME as repo and the login registry
-          if [ -z "${repo_name}" ] || [ -z "${registry}" ]; then
-            repo_name="${PROJECT_NAME:-vox-api}"
-            registry="${REGISTRY:-}"
-          fi
-
-          if [ -z "${registry:-}" ] || [ -z "${repo_name:-}" ]; then
-            echo "ECR registry or repository name missing; cannot verify image." >&2
-            echo "Debug: ECR_URL='${ECR_URL}', ECR_NAME='${ECR_NAME}', REGISTRY='${REGISTRY:-}'" >&2 || true
-            exit 1
-          fi
-
-          echo "Verifying image '${repo_name}:${IMAGE_TAG}' in ECR registry '${registry}'"
-          # AWS CLI expects repository name without registry prefix
-          set +e
-          aws ecr describe-images --repository-name "${repo_name}" --image-ids imageTag="${IMAGE_TAG}" --region "${AWS_REGION}" >/dev/null 2>&1
-          rc=$?
-          set -e
-          if [ $rc -ne 0 ]; then
-            echo "Image ${repo_name}:${IMAGE_TAG} not found in ECR. Ensure the build pushed the image successfully." >&2
-            exit 1
-          fi
-          echo "Image exists in ECR: ${repo_name}:${IMAGE_TAG}"
-
-      - name: Register task definitions (API & Celery) using TF outputs
-        id: register_td
-        env:
-          NEW_IMAGE: ""
-          REGISTRY: ${{ steps.login-ecr-deploy.outputs.registry }}
-          ECS_TASK_FAMILY: ${{ needs.get_terraform_outputs.outputs.ecs_task_family }}
-          CELERY_TASK_FAMILY: ${{ needs.get_terraform_outputs.outputs.celery_task_family }}
-          BASE_ENV_JSON: ${{ needs.get_terraform_outputs.outputs.application_environment }}
-          DB_SSM_NAME: ${{ needs.get_terraform_outputs.outputs.database_url_ssm_name || '' }}
-          DJANGO_SECRET_SSM: ${{ needs.get_terraform_outputs.outputs.django_secret_key_ssm_name || '' }}
-          REDIS_ENDPOINT: ${{ needs.get_terraform_outputs.outputs.redis_primary_endpoint || '' }}
-          REDIS_AUTH_SSM: ""
-          STRIPE_SECRET_SSM: ""
-          STRIPE_WEBHOOK_SSM: ""
-          DJANGO_ENV: ${{ env.DEPLOY_ENV }}
-          FRONTEND_URL: ${{ github.event.inputs.frontend_url }}
-          DJANGO_ALLOWED_HOSTS: ${{ github.event.inputs.django_allowed_hosts }}
-          EMAIL_HOST: ${{ steps.email_config.outputs.email_host }}
-          EMAIL_PORT: ${{ steps.email_config.outputs.email_port }}
-          EMAIL_HOST_USER: ${{ steps.email_config.outputs.email_host_user }}
-          EMAIL_HOST_PASSWORD: ${{ steps.email_config.outputs.email_host_password }}
+      - name: set outputs
+        id: set_outputs
         run: |
-          set -euo pipefail
-
-          # Compute NEW_IMAGE at runtime if it wasn't provided by the build job.
-          if [ -z "${NEW_IMAGE:-}" ] || [ "${NEW_IMAGE:-}" = "null" ]; then
-            echo "NEW_IMAGE not provided by build job; attempting to compute from available data..."
-
-            # 1) Try reading the full URL from local terraform state (safer than job output which may be masked)
-            ecr_repo=""
-            if [ -d "${{ env.TF_WORKDIR }}" ]; then
-              ecr_repo=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_repository_url 2>/dev/null || true)
-            fi
-
-            # 3) If still empty, try composing registry + repo name (repo name fallback to PROJECT_NAME)
-            if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
-              repo_name="${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}"
-              if [ -z "${repo_name}" ] || [ "${repo_name}" = "null" ]; then
-                repo_name="${PROJECT_NAME:-vox-api}"
-              fi
-              registry="${REGISTRY:-}"
-              if [ -z "${registry}" ]; then
-                # Try to obtain registry from TF or fail if not available
-                if [ -d "${{ env.TF_WORKDIR }}" ]; then
-                  registry=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_registry 2>/dev/null || true) || true
-                fi
-              fi
-              if [ -n "${registry}" ]; then
-                ecr_repo="${registry}/${repo_name}"
-              fi
-            fi
-
-            # 4) Build image tag from the current SHA
-            full_sha="${GITHUB_SHA:-${{ github.sha }}}"
-            short_sha="${full_sha:0:7}"
-
-            if [ -n "${ecr_repo}" ] && [ "${ecr_repo}" != "null" ]; then
-              NEW_IMAGE="${ecr_repo}:${short_sha}"
-              echo "Computed NEW_IMAGE=${NEW_IMAGE}"
-            fi
-          fi
-
-          if [ -z "${NEW_IMAGE:-}" ] || [ "${NEW_IMAGE:-}" = "null" ]; then
-            echo "Error: NEW_IMAGE (image URI) not provided from build step and could not be computed." >&2
-            exit 1
-          fi
-
-          make_env_json() {
-            # Ensure BASE_ENV_JSON is valid JSON; if not, fallback to empty object
-            local base_json_raw="${BASE_ENV_JSON:-}"
-            if [ -z "${base_json_raw}" ] || [ "${base_json_raw}" = "null" ]; then
-              base_json='{}'
-            else
-              # try to compact/validate; if invalid, use {}
-              base_json=$(printf '%s' "${base_json_raw}" | jq -c '.' 2>/dev/null || echo '{}')
-            fi
-            jq -n \
-              --argjson base "$base_json" \
-              --arg DJANGO_ENV           "${DJANGO_ENV}" \
-              --arg FRONTEND_URL         "${FRONTEND_URL}" \
-              --arg DJANGO_ALLOWED_HOSTS "${DJANGO_ALLOWED_HOSTS}" \
-              --arg EMAIL_HOST           "${EMAIL_HOST}" \
-              --arg EMAIL_PORT           "${EMAIL_PORT}" \
-              --arg EMAIL_HOST_USER      "${EMAIL_HOST_USER}" \
-              --arg EMAIL_HOST_PASSWORD  "${EMAIL_HOST_PASSWORD}" \
-              '$base
-                | .DJANGO_ENV = $DJANGO_ENV
-                | .FRONTEND_URL = (if $FRONTEND_URL != "" then $FRONTEND_URL else (.FRONTEND_URL // "") end)
-                | .DJANGO_ALLOWED_HOSTS = $DJANGO_ALLOWED_HOSTS
-                | .EMAIL_HOST = $EMAIL_HOST
-                | .EMAIL_PORT = $EMAIL_PORT
-                | .EMAIL_HOST_USER = $EMAIL_HOST_USER
-                | .EMAIL_HOST_PASSWORD = $EMAIL_HOST_PASSWORD
-                | .EMAIL_USE_TLS = "1"
-                | to_entries | map({name:.key, value:.value})'
-          }
-
-          register_td() {
-            local family="$1" name="$2" file="$3"
-            [ -n "$family" ] || { echo "Missing task family for $name" >&2; exit 1; }
-            aws ecs describe-task-definition --task-definition "$family" --query 'taskDefinition' > "$file.json"
-            # Ensure AWS_ACCOUNT_ID is available for ARN construction; try env then STS
-            if [ -z "${AWS_ACCOUNT_ID:-}" ] || [ "${AWS_ACCOUNT_ID:-}" = "null" ]; then
-              AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
-            fi
-            if [ -z "${AWS_ACCOUNT_ID:-}" ] || [ "${AWS_ACCOUNT_ID:-}" = "null" ]; then
-              echo "Warning: AWS_ACCOUNT_ID not available; secret ARNs may not be constructible" >&2
-            fi
-            env_json="$(make_env_json)"
-
-            secrets_json="[]"
-            add_secret() {
-              local name="$1" value_from="$2"
-              if [ -n "$name" ] && [ -n "$value_from" ] && [ "$value_from" != "null" ]; then
-                secrets_json=$(jq -c --arg name "$name" --arg valueFrom "$value_from" '. + [{name:$name, valueFrom:$valueFrom}]' <<<"$secrets_json")
-              fi
-            }
-
-            # DB URL
-            if [ -n "${DB_SSM_NAME:-}" ] && [ "${DB_SSM_NAME:-}" != "null" ]; then
-              DB_VALFROM="$DB_SSM_NAME"
-              if [[ "$DB_VALFROM" != /* ]]; then DB_VALFROM="/${DB_VALFROM}"; fi
-              if [[ "$DB_VALFROM" != arn:* ]]; then
-                DB_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${DB_VALFROM}"
-              fi
-              add_secret "DATABASE_URL" "$DB_VALFROM"
-            fi
-
-            # Django secret
-            if [ -n "${DJANGO_SECRET_SSM:-}" ] && [ "${DJANGO_SECRET_SSM:-}" != "null" ]; then
-              DS_VALFROM="$DJANGO_SECRET_SSM"
-              if [[ "$DS_VALFROM" != /* ]]; then DS_VALFROM="/${DS_VALFROM}"; fi
-              if [[ "$DS_VALFROM" != arn:* ]]; then
-                DS_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${DS_VALFROM}"
-              fi
-              add_secret "DJANGO_SECRET_KEY" "$DS_VALFROM"
-            fi
-
-            # Redis auth + endpoint
-            if [ -n "${REDIS_AUTH_SSM:-}" ] && [ "${REDIS_AUTH_SSM:-}" != "null" ]; then
-              R_VALFROM="$REDIS_AUTH_SSM"
-              if [[ "$R_VALFROM" != /* ]]; then R_VALFROM="/${R_VALFROM}"; fi
-              if [[ "$R_VALFROM" != arn:* ]]; then
-                R_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${R_VALFROM}"
-              fi
-              add_secret "REDIS_AUTH_TOKEN" "$R_VALFROM"
-              if [ -n "${REDIS_ENDPOINT:-}" ] && [ "${REDIS_ENDPOINT:-}" != "null" ]; then
-                env_json=$(jq -c --arg k "REDIS_ENDPOINT" --arg v "${REDIS_ENDPOINT}" '. + [{name:$k, value:$v}]' <<<"$env_json")
-              fi
-            fi
-
-            # Stripe secrets
-            if [ -n "${STRIPE_SECRET_SSM:-}" ] && [ "${STRIPE_SECRET_SSM:-}" != "null" ]; then
-              S_STR_VALFROM="$STRIPE_SECRET_SSM"
-              if [[ "$S_STR_VALFROM" != /* ]]; then S_STR_VALFROM="/${S_STR_VALFROM}"; fi
-              if [[ "$S_STR_VALFROM" != arn:* ]]; then
-                S_STR_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${S_STR_VALFROM}"
-              fi
-              add_secret "STRIPE_SECRET_KEY" "$S_STR_VALFROM"
-            fi
-
-            if [ -n "${STRIPE_WEBHOOK_SSM:-}" ] && [ "${STRIPE_WEBHOOK_SSM:-}" != "null" ]; then
-              S_WEB_VALFROM="$STRIPE_WEBHOOK_SSM"
-              if [[ "$S_WEB_VALFROM" != /* ]]; then S_WEB_VALFROM="/${S_WEB_VALFROM}"; fi
-              if [[ "$S_WEB_VALFROM" != arn:* ]]; then
-                S_WEB_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${S_WEB_VALFROM}"
-              fi
-              add_secret "STRIPE_WEBHOOK_SECRET" "$S_WEB_VALFROM"
-            fi
-
-            # Remove any environment variables that collide with secret names (AWS requires secret names be unique
-            # and not present as environment variables on the same container).
-            # env_json is an array of {name, value}; secrets_json is an array of {name, valueFrom}.
-            if [ -n "${env_json:-}" ]; then
-              # Filter out any env entries whose name appears in secrets_json
-              env_json=$(jq -c --argjson env "$env_json" --argjson secrets "$secrets_json" '
-                ($env // []) | map(select( ($secrets | map(.name) | index(.name)) | not ))
-              ')
-            fi
-
-            # Validate env_json and secrets_json are valid JSON; if not, fall back to empty arrays
-            env_json_valid=$(printf '%s' "$env_json" | jq -c '.' 2>/dev/null || echo '[]')
-            secrets_json_valid=$(printf '%s' "$secrets_json" | jq -c '.' 2>/dev/null || echo '[]')
-
-            jq --arg img "${NEW_IMAGE}" --argjson env "$env_json_valid" --argjson secrets "$secrets_json_valid" \
-              '.containerDefinitions[0].image = $img
-               | .containerDefinitions[0].environment = $env
-               | .containerDefinitions[0].secrets = $secrets
-               | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
-              "$file.json" > "${file}-new.json"
-
-            aws ecs register-task-definition \
-              --cli-input-json file://"${file}-new.json" \
-              --query 'taskDefinition.taskDefinitionArn' --output text
-          }
-
-          API_TD_ARN=$(register_td "${ECS_TASK_FAMILY}"    "api"    "td-api")
-          CEL_TD_ARN=$(register_td "${CELERY_TASK_FAMILY}" "celery" "td-celery")
-          echo "api_td_arn=$API_TD_ARN"    >> "$GITHUB_OUTPUT"
-          echo "celery_td_arn=$CEL_TD_ARN" >> "$GITHUB_OUTPUT"
-
-      - name: Update ECS services
-        env:
-          ECS_CLUSTER: ${{ needs.get_terraform_outputs.outputs.ecs_cluster_name }}
-          API_SERVICE: ${{ needs.get_terraform_outputs.outputs.ecs_service_name }}
-          CELERY_SERVICE: ${{ needs.get_terraform_outputs.outputs.celery_service_name }}
-          API_TD_ARN: ${{ steps.register_td.outputs.api_td_arn }}
-          CELERY_TD_ARN: ${{ steps.register_td.outputs.celery_td_arn }}
-        run: |
-          set -euo pipefail
-          # API
-          [ -n "$ECS_CLUSTER" ] && [ -n "$API_SERVICE" ] && [ -n "$API_TD_ARN" ]
-          aws ecs update-service \
-            --cluster "$ECS_CLUSTER" --service "$API_SERVICE" \
-            --task-definition "$API_TD_ARN" --desired-count 2 --force-new-deployment \
-            --region "${{ env.AWS_REGION }}" --query 'service.serviceArn' --output text >/dev/null
-          # Celery (optional)
-          if [ -n "$CELERY_SERVICE" ] && [ -n "$CELERY_TD_ARN" ]; then
-            aws ecs update-service \
-              --cluster "$ECS_CLUSTER" --service "$CELERY_SERVICE" \
-              --task-definition "$CELERY_TD_ARN" --desired-count 1 --force-new-deployment \
-              --region "${{ env.AWS_REGION }}" --query 'service.serviceArn' --output text >/dev/null
-          fi
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"

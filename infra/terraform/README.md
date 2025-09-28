@@ -28,7 +28,7 @@ Provisioned components include:
 - **Storage:** Private S3 buckets for static assets and media uploads with versioning, lifecycle policies, and default encryption.
 - **Email Service:** Amazon SES for transactional email with optional domain verification, DKIM signing, and SMTP credentials. ECS tasks are granted IAM permissions to send emails via SES API.
 - **Container Registry:** Private Amazon ECR repository with scan-on-push, tag immutability, and lifecycle rules for pruning older images.
-- **Runtime Config:** Terraform outputs expose a complete environment-variable map (`application_environment`) with database URLs, Redis endpoints, and application secrets so the deployment pipeline can inject configuration directly into ECS task definitions.
+- **Runtime Config:** Terraform outputs expose non-sensitive environment variables (`application_environment`) alongside SSM parameter mappings for secrets (`application_environment_secrets`) so the deployment pipeline can inject configuration securely into ECS task definitions.
 
 The resulting infrastructure isolates all stateful services in private subnets and exposes only the ALB to the public internet.
 
@@ -153,7 +153,8 @@ module "ecs" {
 
 ## Key Outputs
 
-- `application_environment`: Map of environment variables for ECS and Celery tasks.
+- `application_environment`: Map of non-sensitive environment variables for ECS and Celery tasks.
+- `application_environment_secrets`: Map of sensitive environment variables to their backing SSM parameter names.
 - `alb_dns_name`, `alb_security_group_id`, `ecs_cluster_name`, `rds_database_url`, `redis_url`, `s3_bucket_names`, etc.
 - Outputs are documented in `outputs.tf` and surfaced for CI/CD and automation.
 
@@ -170,7 +171,9 @@ Add new modules under `modules/` and wire them in via the root `main.tf`. Follow
 - `container_image` – Optional bootstrap image URI for ECS tasks.
 - `availability_zones` – Control which AZs host subnets.
 - `alb_allowed_cidrs` – Restrict incoming traffic to the ALB.
-- `ecs_task_environment` – Additional environment variables for containers.
+- `ecs_task_environment` – Additional non-sensitive environment variables for containers.
+- `ecs_task_secrets` – Map of env var names to existing SSM parameters for sensitive values.
+- `django_allowed_hosts` – Hostnames passed to Django's `ALLOWED_HOSTS` setting.
 - `celery_cpu`, `celery_memory`, `celery_desired_count` – Celery worker resources.
 - `frontend_url` – Base URL for password reset and CORS.
 - `single_nat_gateway` – Share a single NAT gateway across AZs.
@@ -272,14 +275,14 @@ ECS tasks automatically receive SES send permissions via the `ses_send_email` IA
 ## Security & Reliability Highlights
 
 - **Private-only data plane:** ECS tasks, PostgreSQL, and Redis live in private subnets. NAT gateways and VPC endpoints enable outbound access without exposing instances.
-- **Managed config:** Passwords, auth tokens, and the Django secret key are generated automatically and exposed through the `application_environment` output so pipelines can inject them as environment variables.
+- **Managed config:** Passwords, auth tokens, and the Django secret key are generated automatically and surfaced via `application_environment_secrets`, while non-sensitive settings remain in `application_environment`.
 - **Resilience:** Single-instance deployments for RDS and Redis by default (configurable to multi-AZ), ALB health checks, ECS circuit breakers, and autoscaling policies keep the service responsive to failures or load spikes.
 - **Observability:** VPC flow logs and structured ECS logs land in CloudWatch; ALB access logs are delivered to an encrypted S3 bucket.
 
 ## Next Steps
 
 - Point your domain (Route 53 or external registrar) to the ALB using the `alb_dns_name` and `alb_hosted_zone_id` outputs.
-- Wire application configuration into your deployment automation by consuming the `application_environment` output (includes values such as `DATABASE_URL`, `REDIS_URL`, and `DJANGO_SECRET_KEY`).
+- Wire application configuration into your deployment automation by consuming the `application_environment` output for plain values and `application_environment_secrets` for the SSM parameter names that hold sensitive data (for example `DATABASE_URL`, `REDIS_URL`, and `SECRET_KEY`).
 - Push container images to the `ecr_repository_url` output and, if desired, set the `CONTAINER_IMAGE` secret used by the deploy workflow for bootstrap applies.
 - Optionally extend with CloudFront, WAF, or additional services by creating new modules alongside the included ones.
 

@@ -68,6 +68,18 @@ variable "container_image" {
   type        = string
 }
 
+variable "image_tag" {
+  description = "Optional image tag (short sha) provided by CI. If provided, and container_image is not a full image, module will construct full image using account/reg and ecr_repository_name or name_prefix."
+  type        = string
+  default     = ""
+}
+
+variable "ecr_repository_name" {
+  description = "Optional ECR repository name to compose image URI when only image_tag is provided. Falls back to name_prefix if empty."
+  type        = string
+  default     = ""
+}
+
 variable "container_port" {
   description = "Container port exposed by the service"
   type        = number
@@ -108,6 +120,12 @@ variable "log_retention_in_days" {
 
 variable "environment" {
   description = "Environment variables injected into the container"
+  type        = map(string)
+  default     = {}
+}
+
+variable "environment_secrets" {
+  description = "Map of environment variable names to SSM parameter names or ARNs. Values may be full ARN or a parameter name (with or without leading /)."
   type        = map(string)
   default     = {}
 }

@@ -3,6 +3,21 @@
 locals {
   container_name = "${var.name_prefix}-api"
   environment    = [for k, v in var.environment : { name = k, value = v }]
+  # Build secrets array for ECS task definition from map of env name => ssm param/arn
+  secrets = [for k, v in var.environment_secrets :
+    {
+      name      = k
+      valueFrom = (can(regex("^arn:aws:ssm:[^:]+:[0-9]+:parameter/.+", v)) ? v : "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${replace(v, "^/", "")}")
+    }
+  ]
+  # Compute effective container image: if var.container_image looks like a full image (contains '/'), use it.
+  # Otherwise, construct from account/reg + repo + tag when tag provided via var.image_tag.
+  effective_repo = length(var.ecr_repository_name) > 0 ? var.ecr_repository_name : var.name_prefix
+  container_image_effective = (
+    contains(var.container_image, "/") ? var.container_image : (
+      length(var.image_tag) > 0 ? format("%s:%s", local.effective_repo, var.image_tag) : var.container_image
+    )
+  )
 }
 
 data "aws_elb_service_account" "this" {}
@@ -226,7 +241,7 @@ resource "aws_ecs_task_definition" "this" {
   container_definitions = jsonencode([
     {
       name      = local.container_name
-      image     = var.container_image
+      image     = local.container_image_effective
       essential = true
       portMappings = [
         {
@@ -244,6 +259,7 @@ resource "aws_ecs_task_definition" "this" {
         }
       }
       environment = local.environment
+      secrets     = local.secrets
       healthCheck = {
         command  = ["CMD-SHELL", "curl -f http://localhost:${var.container_port}${var.health_check_path} || exit 1"]
         interval = 30

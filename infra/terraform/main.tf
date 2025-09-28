@@ -24,13 +24,10 @@ resource "aws_iam_policy" "ecs_ssm_read" {
     Statement = concat(
       [
         {
-          Sid    = "AllowGetParameter"
-          Effect = "Allow"
-          Action = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"]
-          Resource = [
-            local.ssm_db_parameter_arn,
-            local.ssm_django_parameter_arn
-          ]
+          Sid      = "AllowGetParameter"
+          Effect   = "Allow"
+          Action   = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"]
+          Resource = local.ssm_parameters_for_ecs
         }
       ],
       var.ssm_parameter_kms_key_arn != "" ? [
@@ -82,32 +79,75 @@ provider "aws" {
 }
 
 locals {
-  ecs_environment = merge(
+  canonical_environment = lower(trimspace(var.environment))
+
+  django_env = local.canonical_environment == "production" || local.canonical_environment == "prod" ? "production" : (local.canonical_environment == "staging" || local.canonical_environment == "stage" || local.canonical_environment == "stg" ? "staging" : "development")
+
+  allowed_hosts_list = length(var.django_allowed_hosts) > 0 ? var.django_allowed_hosts : []
+  allowed_hosts_csv  = length(local.allowed_hosts_list) > 0 ? join(",", local.allowed_hosts_list) : ""
+
+  ecs_environment_base = merge(
     {
+      DJANGO_ENV              = local.django_env
       FRONTEND_URL            = var.frontend_url
       AWS_STORAGE_BUCKET_NAME = module.storage.static_bucket_name
       STATIC_BUCKET_NAME      = module.storage.static_bucket_name
       MEDIA_BUCKET_NAME       = module.storage.media_bucket_name
-      DATABASE_URL            = module.storage.database_url_ssm_name
+      AWS_S3_REGION_NAME      = var.aws_region
       POSTGRES_DB             = module.storage.rds_dbname
       POSTGRES_USER           = module.storage.rds_username
-      POSTGRES_PASSWORD       = module.storage.rds_password
-      REDIS_PASSWORD          = module.storage.redis_auth_token
-      CELERY_BROKER_URL       = "redis://:${module.storage.redis_auth_token}@${module.storage.redis_primary_endpoint}:6379/0"
-      CELERY_RESULT_BACKEND   = "redis://:${module.storage.redis_auth_token}@${module.storage.redis_primary_endpoint}:6379/0"
+      POSTGRES_HOST           = module.storage.rds_endpoint
+      POSTGRES_PORT           = tostring(module.storage.rds_port)
+      REDIS_HOST              = module.storage.redis_primary_endpoint
+      REDIS_PORT              = "6379"
       USE_REDIS_FOR_CELERY    = "1"
-    }
+    },
+    length(local.allowed_hosts_csv) > 0 ? { DJANGO_ALLOWED_HOSTS = local.allowed_hosts_csv } : {},
+    var.ecs_task_environment
   )
-  # Construct ARNs for SSM parameters we need ECS tasks to read
-  ssm_db_parameter_arn     = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${module.storage.database_url_ssm_name}"
-  ssm_django_parameter_arn = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${module.storage.django_secret_key_ssm_name}"
 
-  ecs_environment_kv = [
-    for name, value in local.ecs_environment : {
-      name  = name
-      value = value
-    }
-  ]
+  ecs_environment = { for k, v in local.ecs_environment_base : k => tostring(v) if trimspace(k) != "" }
+
+  ecs_environment_secrets = merge(
+    {
+      DATABASE_URL          = module.storage.database_url_ssm_name
+      POSTGRES_PASSWORD     = module.storage.postgres_password_ssm_name
+      SECRET_KEY            = module.storage.django_secret_key_ssm_name
+      REDIS_PASSWORD        = module.storage.redis_auth_token_ssm_name
+      REDIS_URL             = module.storage.redis_url_ssm_name
+      CELERY_BROKER_URL     = module.storage.celery_broker_url_ssm_name
+      CELERY_RESULT_BACKEND = module.storage.celery_result_backend_ssm_name
+    },
+    module.storage.stripe_webhook_secret_ssm_name != null ? { STRIPE_WEBHOOK_SECRET = module.storage.stripe_webhook_secret_ssm_name } : {},
+    module.storage.stripe_secret_key_ssm_name != null ? { STRIPE_SECRET_KEY = module.storage.stripe_secret_key_ssm_name } : {},
+    var.ecs_task_secrets
+  )
+
+  application_environment_plain   = local.ecs_environment
+  application_environment_secrets = local.ecs_environment_secrets
+
+  ssm_db_parameter_arn                = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${module.storage.database_url_ssm_name}"
+  ssm_django_parameter_arn            = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${module.storage.django_secret_key_ssm_name}"
+  ssm_postgres_password_parameter_arn = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${module.storage.postgres_password_ssm_name}"
+  ssm_redis_auth_parameter_arn        = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${module.storage.redis_auth_token_ssm_name}"
+  ssm_redis_url_parameter_arn         = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${module.storage.redis_url_ssm_name}"
+  ssm_celery_broker_parameter_arn     = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${module.storage.celery_broker_url_ssm_name}"
+  ssm_celery_backend_parameter_arn    = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${module.storage.celery_result_backend_ssm_name}"
+  ssm_stripe_webhook_parameter_arn    = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${module.storage.stripe_webhook_secret_ssm_name}"
+  ssm_stripe_secret_parameter_arn     = module.storage.stripe_secret_key_ssm_name != null ? "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${module.storage.stripe_secret_key_ssm_name}" : null
+
+  ssm_parameters_for_ecs = compact([
+    local.ssm_db_parameter_arn,
+    local.ssm_django_parameter_arn,
+    local.ssm_postgres_password_parameter_arn,
+    local.ssm_redis_auth_parameter_arn,
+    local.ssm_redis_url_parameter_arn,
+    local.ssm_celery_broker_parameter_arn,
+    local.ssm_celery_backend_parameter_arn,
+    local.ssm_stripe_webhook_parameter_arn,
+    local.ssm_stripe_secret_parameter_arn
+  ])
+
   name_prefix = lower(replace("${var.project}-${local.short_environment}", "_", "-"))
   tags = merge(
     {
@@ -116,6 +156,16 @@ locals {
       ManagedBy   = "terraform"
     },
     var.additional_tags
+  )
+
+  ecs_additional_task_policies = {
+    for idx, arn in var.ecs_task_role_policy_arns : format("extra_%02d", idx) => arn
+    if trimspace(arn) != ""
+  }
+
+  ecs_task_role_policy_map = merge(
+    { ssm_read_policy = aws_iam_policy.ecs_ssm_read.arn },
+    local.ecs_additional_task_policies
   )
 }
 
@@ -213,9 +263,11 @@ module "storage" {
   db_subnet_group_name    = module.network.db_subnet_group_name
   redis_subnet_group_name = module.network.redis_subnet_group_name
 
-  redis_auth_token       = random_password.redis.result
-  bucket_suffix_override = var.bucket_suffix_override
-  bucket_suffix_length   = var.bucket_suffix_length
+  redis_auth_token          = random_password.redis.result
+  bucket_suffix_override    = var.bucket_suffix_override
+  bucket_suffix_length      = var.bucket_suffix_length
+  stripe_secret_key         = var.stripe_secret_key
+  ssm_parameter_kms_key_arn = var.ssm_parameter_kms_key_arn
 }
 
 # -----------------------------------------------------------------------------
@@ -228,10 +280,15 @@ module "ecs" {
   cpu         = var.ecs_cpu
   memory      = var.ecs_memory
   # execution_role_arn left blank to use module's created execution role or an explicit override
-  container_image           = trimspace(var.container_image) != "" ? var.container_image : "${module.storage.ecr_repository_url}:latest"
-  environment               = local.ecs_environment
+  container_image     = trimspace(var.container_image) != "" ? var.container_image : "${module.storage.ecr_repository_url}:latest"
+  environment         = local.ecs_environment
+  environment_secrets = local.ecs_environment_secrets
+  # Image tag and ECR repo allow CI to drive new task definition revisions by calling
+  # terraform apply -var 'image_tag=<shortsha>'
+  ecr_repository_name       = module.storage.ecr_repository_name
+  image_tag                 = var.image_tag
   aws_region                = var.aws_region
-  ecs_log_group_name        = local.ecs_log_group_name != null ? local.ecs_log_group_name : "${local.name_prefix}-ecs-logs"
+  ecs_log_group_name        = "${local.name_prefix}-ecs-logs"
   vpc_id                    = module.network.vpc_id
   private_subnet_ids        = module.network.private_app_subnet_ids
   public_subnet_ids         = module.network.public_subnet_ids
@@ -241,49 +298,9 @@ module "ecs" {
   desired_count             = var.ecs_desired_count
   log_retention_in_days     = var.ecs_log_retention_in_days
   certificate_arn           = var.certificate_arn
-  ecs_cpu_high_alarm_name   = local.ecs_cpu_high_alarm_name != null ? local.ecs_cpu_high_alarm_name : "${local.name_prefix}-ecs-cpu-high"
-  ecs_unhealthy_alarm_name  = local.ecs_unhealthy_alarm_name != null ? local.ecs_unhealthy_alarm_name : "${local.name_prefix}-ecs-unhealthy"
+  ecs_cpu_high_alarm_name   = "${local.name_prefix}-ecs-cpu-high"
+  ecs_unhealthy_alarm_name  = "${local.name_prefix}-ecs-unhealthy"
   depends_on                = [module.storage]
   tags                      = local.tags
-}
-
-locals {
-  ecs_task_role_policy_map = merge(
-    {
-      app_bucket_access = null
-      ses_send_email    = null
-      ssm_read_policy   = aws_iam_policy.ecs_ssm_read.arn
-    },
-    {
-      FRONTEND_URL            = var.frontend_url
-      AWS_STORAGE_BUCKET_NAME = module.storage.static_bucket_name
-      STATIC_BUCKET_NAME      = module.storage.static_bucket_name
-      MEDIA_BUCKET_NAME       = module.storage.media_bucket_name
-      DATABASE_URL            = module.storage.database_url_ssm_name
-      POSTGRES_DB             = module.storage.rds_dbname
-      POSTGRES_USER           = module.storage.rds_username
-      POSTGRES_PASSWORD       = module.storage.rds_password
-      REDIS_PASSWORD          = module.storage.redis_auth_token
-      CELERY_BROKER_URL       = "redis://:${module.storage.redis_auth_token}@${module.storage.redis_primary_endpoint}:6379/0"
-      CELERY_RESULT_BACKEND   = "redis://:${module.storage.redis_auth_token}@${module.storage.redis_primary_endpoint}:6379/0"
-      USE_REDIS_FOR_CELERY    = "1"
-    }
-  )
-  vpc_id                   = module.network.vpc_id
-  private_subnet_ids       = module.network.private_app_subnet_ids
-  container_port           = var.container_port
-  desired_count            = var.ecs_desired_count
-  cpu                      = var.ecs_cpu
-  memory                   = var.ecs_memory
-  environment              = local.ecs_environment
-  ecs_log_group_name       = null
-  ecs_cpu_high_alarm_name  = null
-  ecs_unhealthy_alarm_name = null
-  log_retention_in_days    = var.ecs_log_retention_in_days
-  certificate_arn          = var.certificate_arn
-  scale_min_capacity       = var.ecs_scale_min_capacity
-  scale_max_capacity       = var.ecs_scale_max_capacity
-  scale_cpu_target         = var.ecs_scale_cpu_target
-  scale_memory_target      = var.ecs_scale_memory_target
-  task_role_policy_arns    = local.ecs_task_role_policy_map
+  task_role_policy_arns     = local.ecs_task_role_policy_map
 }

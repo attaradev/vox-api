@@ -214,10 +214,75 @@ resource "aws_ssm_parameter" "django_secret_key" {
   key_id    = var.ssm_parameter_kms_key_arn != "" ? var.ssm_parameter_kms_key_arn : null
 }
 
+resource "aws_ssm_parameter" "postgres_password" {
+  name      = "/${var.name_prefix}/postgres_password"
+  type      = "SecureString"
+  value     = var.db_password
+  overwrite = true
+  tags      = var.tags
+  key_id    = var.ssm_parameter_kms_key_arn != "" ? var.ssm_parameter_kms_key_arn : null
+}
+
 resource "random_password" "stripe_webhook_secret" {
   length           = 32
   special          = true
   override_special = "!@#$%^&*()-_=+[]{}"
+}
+
+resource "aws_ssm_parameter" "stripe_webhook_secret" {
+  name      = "/${var.name_prefix}/stripe_webhook_secret"
+  type      = "SecureString"
+  value     = random_password.stripe_webhook_secret.result
+  overwrite = true
+  tags      = var.tags
+  key_id    = var.ssm_parameter_kms_key_arn != "" ? var.ssm_parameter_kms_key_arn : null
+}
+
+resource "aws_ssm_parameter" "stripe_secret_key" {
+  count = trimspace(var.stripe_secret_key) != "" ? 1 : 0
+
+  name      = "/${var.name_prefix}/stripe_secret_key"
+  type      = "SecureString"
+  value     = var.stripe_secret_key
+  overwrite = true
+  tags      = var.tags
+  key_id    = var.ssm_parameter_kms_key_arn != "" ? var.ssm_parameter_kms_key_arn : null
+}
+
+resource "aws_ssm_parameter" "redis_auth_token" {
+  name      = "/${var.name_prefix}/redis_auth_token"
+  type      = "SecureString"
+  value     = var.redis_auth_token
+  overwrite = true
+  tags      = var.tags
+  key_id    = var.ssm_parameter_kms_key_arn != "" ? var.ssm_parameter_kms_key_arn : null
+}
+
+resource "aws_ssm_parameter" "redis_url" {
+  name      = "/${var.name_prefix}/redis_url"
+  type      = "SecureString"
+  value     = "redis://:${var.redis_auth_token}@${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379/0"
+  overwrite = true
+  tags      = var.tags
+  key_id    = var.ssm_parameter_kms_key_arn != "" ? var.ssm_parameter_kms_key_arn : null
+}
+
+resource "aws_ssm_parameter" "celery_broker_url" {
+  name      = "/${var.name_prefix}/celery_broker_url"
+  type      = "SecureString"
+  value     = "redis://:${var.redis_auth_token}@${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379/0"
+  overwrite = true
+  tags      = var.tags
+  key_id    = var.ssm_parameter_kms_key_arn != "" ? var.ssm_parameter_kms_key_arn : null
+}
+
+resource "aws_ssm_parameter" "celery_result_backend" {
+  name      = "/${var.name_prefix}/celery_result_backend"
+  type      = "SecureString"
+  value     = "redis://:${var.redis_auth_token}@${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379/0"
+  overwrite = true
+  tags      = var.tags
+  key_id    = var.ssm_parameter_kms_key_arn != "" ? var.ssm_parameter_kms_key_arn : null
 }
 
 # ------------------------------------------------------------------------

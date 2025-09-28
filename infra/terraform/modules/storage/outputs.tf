@@ -18,6 +18,11 @@ output "ecr_repository_url" {
   description = "ECR repository URL for application images"
 }
 
+output "ecr_repository_name" {
+  value       = aws_ecr_repository.app.name
+  description = "Name of the application ECR repository"
+}
+
 output "ecr_repository_arn" {
   value       = aws_ecr_repository.app.arn
   description = "ARN of the application ECR repository"
@@ -28,10 +33,45 @@ output "database_url_ssm_name" {
   description = "Name of the SSM parameter storing the database URL"
 }
 
+output "postgres_password_ssm_name" {
+  value       = aws_ssm_parameter.postgres_password.name
+  description = "SSM parameter that stores the Postgres password"
+}
+
+output "redis_auth_token_ssm_name" {
+  value       = aws_ssm_parameter.redis_auth_token.name
+  description = "SSM parameter that stores the Redis auth token"
+}
+
+output "redis_url_ssm_name" {
+  value       = aws_ssm_parameter.redis_url.name
+  description = "SSM parameter that stores the Redis connection URL"
+}
+
+output "celery_broker_url_ssm_name" {
+  value       = aws_ssm_parameter.celery_broker_url.name
+  description = "SSM parameter that stores the Celery broker URL"
+}
+
+output "celery_result_backend_ssm_name" {
+  value       = aws_ssm_parameter.celery_result_backend.name
+  description = "SSM parameter that stores the Celery result backend URL"
+}
 
 output "stripe_webhook_secret" {
   value       = random_password.stripe_webhook_secret.result
   description = "Generated Stripe webhook secret"
+  sensitive   = true
+}
+
+output "stripe_webhook_secret_ssm_name" {
+  value       = aws_ssm_parameter.stripe_webhook_secret.name
+  description = "SSM parameter that stores the Stripe webhook secret"
+}
+
+output "stripe_secret_key_ssm_name" {
+  value       = try(aws_ssm_parameter.stripe_secret_key[0].name, null)
+  description = "SSM parameter that stores the Stripe API secret key (if provided)"
 }
 
 output "django_secret_key_ssm_name" {

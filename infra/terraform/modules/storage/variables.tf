@@ -104,6 +104,13 @@ variable "redis_auth_token" {
   type        = string
 }
 
+variable "stripe_secret_key" {
+  description = "Stripe API secret key used by the application"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "redis_subnet_group_name" {
   description = "Subnet group name for Redis cluster"
   type        = string

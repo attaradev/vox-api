@@ -182,6 +182,12 @@ variable "ecr_repository_name" {
   default     = ""
 }
 
+variable "image_tag" {
+  description = "Optional image tag (short sha) provided by CI to trigger new task definition revisions."
+  type        = string
+  default     = ""
+}
+
 variable "ecr_image_tag_mutability" {
   description = "ECR image tag mutability setting"
   type        = string
@@ -232,6 +238,12 @@ variable "ecs_memory" {
 
 variable "ecs_task_environment" {
   description = "Additional environment variables injected into the ECS task"
+  type        = map(string)
+  default     = {}
+}
+
+variable "ecs_task_secrets" {
+  description = "Additional secret environment variables mapped to SSM parameter names"
   type        = map(string)
   default     = {}
 }
@@ -493,6 +505,12 @@ variable "frontend_url" {
   description = "Public URL of the frontend"
   type        = string
   default     = ""
+}
+
+variable "django_allowed_hosts" {
+  description = "List of allowed hostnames passed to Django"
+  type        = list(string)
+  default     = []
 }
 
 variable "email_domain" {

@@ -12,8 +12,14 @@ alb_allowed_cidrs = ["0.0.0.0/0"]
 # Merge with defaults defined in variables.tf
 ecs_task_environment = {
   DJANGO_SETTINGS_MODULE = "vox_api.settings.production"
-  ALLOWED_HOSTS          = "app.example.com"
 }
+
+# Optional additional secrets can be mapped to existing SSM parameters
+# ecs_task_secrets = {
+#   THIRD_PARTY_API_TOKEN = "/vox-staging/third_party_api_token"
+# }
+
+django_allowed_hosts = ["app.example.com"]
 
 stripe_secret_key = "SK_REDACTED"
 frontend_url      = "https://app.example.com"
