@@ -94,6 +94,7 @@ jobs:
       celery_service_name: ${{ steps.outs.outputs.celery_service_name }}
       celery_task_family: ${{ steps.outs.outputs.celery_task_family }}
       ecr_repository_url: ${{ steps.outs.outputs.ecr_repository_url }}
+      ecr_repository_name: ${{ steps.outs.outputs.ecr_repository_name }}
       django_secret_key_ssm_name: ${{ steps.outs.outputs.django_secret_key_ssm_name }}
       database_url: ${{ steps.outs.outputs.database_url }}
       database_url_ssm_name: ${{ steps.outs.outputs.database_url_ssm_name }}
@@ -149,7 +150,8 @@ jobs:
           fi
           eo(){ terraform output -raw "$1" 2>/dev/null || true; }
           for k in ecs_cluster_name ecs_service_name ecs_task_family celery_service_name celery_task_family \
-                   ecr_repository_url django_secret_key_ssm_name database_url database_url_ssm_name postgres_db postgres_user postgres_password postgres_host postgres_port \
+                   ecr_repository_url ecr_repository_name \
+                   django_secret_key_ssm_name database_url database_url_ssm_name postgres_db postgres_user postgres_password postgres_host postgres_port \
                    redis_url redis_reader_url redis_auth_token redis_primary_endpoint static_bucket_name media_bucket_name stripe_secret_key stripe_webhook_secret \
                    ses_smtp_username ses_smtp_password
           do
@@ -164,8 +166,9 @@ jobs:
           fi
 
           ECR_OUT="$(eo ecr_repository_url)"
-          if [ -z "$ECR_OUT" ] || [ "$ECR_OUT" = "null" ]; then
-            echo "Error: required Terraform output 'ecr_repository_url' is empty for workspace '${{ env.DEPLOY_ENV }}'" >&2
+          ECR_NAME="$(eo ecr_repository_name)"
+          if { [ -z "$ECR_OUT" ] || [ "$ECR_OUT" = "null" ]; } && { [ -z "$ECR_NAME" ] || [ "$ECR_NAME" = "null" ]; }; then
+            echo "Error: Terraform did not output 'ecr_repository_url' or 'ecr_repository_name' for workspace '${{ env.DEPLOY_ENV }}'." >&2
             terraform output -json || true
             exit 1
           fi
@@ -174,7 +177,6 @@ jobs:
         run: |
           set -euo pipefail
           missing=()
-          [ -z "${{ steps.outs.outputs.ecr_repository_url }}" ] && missing+=(ecr_repository_url)
           [ -z "${{ steps.outs.outputs.ecs_task_family }}" ] && missing+=(ecs_task_family)
           [ -z "${{ steps.outs.outputs.ecs_cluster_name }}" ] && missing+=(ecs_cluster_name)
           if [ ${#missing[@]} -gt 0 ]; then
@@ -203,6 +205,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Login to ECR
+        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Determine image metadata
@@ -211,17 +214,22 @@ jobs:
           set -euo pipefail
           full_sha="${GITHUB_SHA:-${{ github.sha }}}"
           short_sha="${full_sha:0:7}"
+
+          # Prefer full URL from Terraform
           ecr_repo="${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}"
+
+          # Fallback: compose from login registry + TF repo name
           if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
-            echo "ECR repository URL missing from get_terraform_outputs; attempting to read from Terraform state..." >&2
-            if [ -d "${{ env.TF_WORKDIR }}" ]; then
-              ecr_repo=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_repository_url 2>/dev/null || true)
+            repo_name="${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}"
+            registry="${{ steps.login-ecr.outputs.registry }}"
+            if [ -z "${repo_name}" ] || [ "${repo_name}" = "null" ] || [ -z "${registry}" ]; then
+              echo "ECR repository details missing (url/name/registry)." >&2
+              echo "Debug: ecr_repository_url='${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}', ecr_repository_name='${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}', registry='${{ steps.login-ecr.outputs.registry }}'" >&2
+              exit 1
             fi
+            ecr_repo="${registry}/${repo_name}"
           fi
-          if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
-            echo "ECR repository URL missing from get_terraform_outputs and Terraform state; aborting." >&2
-            exit 1
-          fi
+
           echo "IMAGE_TAG=${short_sha}" >> "$GITHUB_OUTPUT"
           echo "IMAGE_URI=${ecr_repo}:${short_sha}" >> "$GITHUB_OUTPUT"
 
@@ -253,7 +261,6 @@ jobs:
       - name: Install jq
         run: sudo apt-get update -y && sudo apt-get install -y jq
 
-      # Email configuration: Uses SES SMTP credentials if available, otherwise falls back to user inputs
       - name: Determine email configuration
         id: email_config
         run: |
@@ -343,7 +350,7 @@ jobs:
               fi
             }
 
-            # Build SSM ARNs if needed
+            # DB URL
             if [ -n "${DB_SSM_NAME:-}" ] && [ "${DB_SSM_NAME:-}" != "null" ]; then
               DB_VALFROM="$DB_SSM_NAME"
               if [[ "$DB_VALFROM" != /* ]]; then DB_VALFROM="/${DB_VALFROM}"; fi
@@ -353,6 +360,7 @@ jobs:
               add_secret "DATABASE_URL" "$DB_VALFROM"
             fi
 
+            # Django secret
             if [ -n "${DJANGO_SECRET_SSM:-}" ] && [ "${DJANGO_SECRET_SSM:-}" != "null" ]; then
               DS_VALFROM="$DJANGO_SECRET_SSM"
               if [[ "$DS_VALFROM" != /* ]]; then DS_VALFROM="/${DS_VALFROM}"; fi
@@ -362,6 +370,7 @@ jobs:
               add_secret "DJANGO_SECRET_KEY" "$DS_VALFROM"
             fi
 
+            # Redis auth + endpoint
             if [ -n "${REDIS_AUTH_SSM:-}" ] && [ "${REDIS_AUTH_SSM:-}" != "null" ]; then
               R_VALFROM="$REDIS_AUTH_SSM"
               if [[ "$R_VALFROM" != /* ]]; then R_VALFROM="/${R_VALFROM}"; fi
@@ -374,6 +383,7 @@ jobs:
               fi
             fi
 
+            # Stripe secrets
             if [ -n "${STRIPE_SECRET_SSM:-}" ] && [ "${STRIPE_SECRET_SSM:-}" != "null" ]; then
               S_STR_VALFROM="$STRIPE_SECRET_SSM"
               if [[ "$S_STR_VALFROM" != /* ]]; then S_STR_VALFROM="/${S_STR_VALFROM}"; fi
