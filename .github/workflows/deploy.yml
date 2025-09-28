@@ -140,10 +140,8 @@ jobs:
           echo "Resolved AWS account id: ${AWS_ACCOUNT_ID}"
           # Export account id for later steps that need to build ARNs
           echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> "$GITHUB_ENV"
-          if ! terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null; then
-            echo "Error: Workspace '${{ env.DEPLOY_ENV }}' does not exist. Please run the infrastructure workflow first."
-            exit 1
-          fi
+          # Ensure the workspace exists for the target environment (create if missing)
+          terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null || terraform workspace new "${{ env.DEPLOY_ENV }}"
 
       - name: Get Terraform outputs
         id: outs
@@ -230,7 +228,7 @@ jobs:
           # Defensive checks: ensure we have an ECR repo URL and image tag before trying to build/push
           if [ -z "${ECR_REPO_URL:-}" ] || [ "${ECR_REPO_URL:-}" = "null" ]; then
             echo "Error: ECR_REPO_URL is empty. Terraform did not output an ECR repository URL for this environment."
-            echo "Please run the infrastructure workflow to provision the ECR repository or set the CONTAINER_IMAGE secret to override."
+            echo "Possible fixes: run the infrastructure workflow for the '${{ env.DEPLOY_ENV }}' environment, or import an existing ECR repo into the Terraform 'production' workspace so the output 'ecr_repository_url' is populated."
             echo "Terraform output 'ecr_repository_url' was: '${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}'" >&2 || true
             exit 1
           fi
