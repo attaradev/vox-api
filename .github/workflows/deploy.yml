@@ -558,9 +558,10 @@ jobs:
             # and not present as environment variables on the same container).
             # env_json is an array of {name, value}; secrets_json is an array of {name, valueFrom}.
             if [ -n "${env_json:-}" ]; then
+              # Filter out any env entries whose name appears in secrets_json
               env_json=$(jq -c --argjson env "$env_json" --argjson secrets "$secrets_json" '
-                ($env // []) | map(select((.name as $n) | ($secrets | map(.name) | index($n) | not)))
-              ' <<<"$env_json")
+                ($env // []) | map(select( ($secrets | map(.name) | index(.name)) | not ))
+              ')
             fi
 
             jq --arg img "${NEW_IMAGE}" --argjson env "$env_json" --argjson secrets "$secrets_json" \
