@@ -564,7 +564,11 @@ jobs:
               ')
             fi
 
-            jq --arg img "${NEW_IMAGE}" --argjson env "$env_json" --argjson secrets "$secrets_json" \
+            # Validate env_json and secrets_json are valid JSON; if not, fall back to empty arrays
+            env_json_valid=$(printf '%s' "$env_json" | jq -c '.' 2>/dev/null || echo '[]')
+            secrets_json_valid=$(printf '%s' "$secrets_json" | jq -c '.' 2>/dev/null || echo '[]')
+
+            jq --arg img "${NEW_IMAGE}" --argjson env "$env_json_valid" --argjson secrets "$secrets_json_valid" \
               '.containerDefinitions[0].image = $img
                | .containerDefinitions[0].environment = $env
                | .containerDefinitions[0].secrets = $secrets
