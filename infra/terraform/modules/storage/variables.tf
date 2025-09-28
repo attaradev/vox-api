@@ -28,7 +28,7 @@ variable "db_instance_class" {
 variable "db_parameter_group_name" {
   description = "Parameter group name for the Postgres instance"
   type        = string
-  default     = "default.postgres15"
+  default     = ""
 }
 
 variable "db_publicly_accessible" {
