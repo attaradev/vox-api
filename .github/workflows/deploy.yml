@@ -222,8 +222,12 @@ jobs:
           if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
             repo_name="${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}"
             registry="${{ steps.login-ecr.outputs.registry }}"
-            if [ -z "${repo_name}" ] || [ "${repo_name}" = "null" ] || [ -z "${registry}" ]; then
-              echo "ECR repository details missing (url/name/registry)." >&2
+            # If TF does not expose ecr_repository_name, default to PROJECT_NAME (matches storage module behavior)
+            if [ -z "${repo_name}" ] || [ "${repo_name}" = "null" ]; then
+              repo_name="${PROJECT_NAME:-vox-api}"
+            fi
+            if [ -z "${registry}" ]; then
+              echo "ECR registry missing from login step; cannot compose repository URL." >&2
               echo "Debug: ecr_repository_url='${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}', ecr_repository_name='${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}', registry='${{ steps.login-ecr.outputs.registry }}'" >&2
               exit 1
             fi
