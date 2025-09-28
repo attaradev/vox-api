@@ -134,13 +134,8 @@ jobs:
         working-directory: ${{ env.TF_WORKDIR }}
         run: |
           set -euo pipefail
-
-          # Discover AWS account id at runtime (needed to build SSM ARNs if TF only provides parameter names)
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
-          echo "Resolved AWS account id: ${AWS_ACCOUNT_ID}"
-          # Export account id for later steps that need to build ARNs
           echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> "$GITHUB_ENV"
-          # Ensure the workspace exists for the target environment (create if missing)
           terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null || terraform workspace new "${{ env.DEPLOY_ENV }}"
 
       - name: Get Terraform outputs
@@ -154,8 +149,8 @@ jobs:
           fi
           eo(){ terraform output -raw "$1" 2>/dev/null || true; }
           for k in ecs_cluster_name ecs_service_name ecs_task_family celery_service_name celery_task_family \
-                   ecr_repository_url django_secret_key_ssm_name database_url postgres_db postgres_user postgres_password postgres_host postgres_port \
-                   redis_url redis_reader_url redis_auth_token static_bucket_name media_bucket_name stripe_secret_key stripe_webhook_secret \
+                   ecr_repository_url django_secret_key_ssm_name database_url database_url_ssm_name postgres_db postgres_user postgres_password postgres_host postgres_port \
+                   redis_url redis_reader_url redis_auth_token redis_primary_endpoint static_bucket_name media_bucket_name stripe_secret_key stripe_webhook_secret \
                    ses_smtp_username ses_smtp_password
           do
             v="$(eo "$k")"; echo "$k=$v" >> "$GITHUB_OUTPUT"
@@ -168,21 +163,20 @@ jobs:
             echo "application_environment={}" >> "$GITHUB_OUTPUT"
           fi
 
+          ECR_OUT="$(eo ecr_repository_url)"
+          if [ -z "$ECR_OUT" ] || [ "$ECR_OUT" = "null" ]; then
+            echo "Error: required Terraform output 'ecr_repository_url' is empty for workspace '${{ env.DEPLOY_ENV }}'" >&2
+            terraform output -json || true
+            exit 1
+          fi
+
       - name: Validate required Terraform outputs
         run: |
           set -euo pipefail
           missing=()
-          if [ -z "${{ steps.outs.outputs.ecr_repository_url }}" ] || [ "${{ steps.outs.outputs.ecr_repository_url }}" = "null" ]; then
-            missing+=(ecr_repository_url)
-            echo "Note: ecr_repository_url is empty; printing 'terraform output -json' for debugging:" >&2 || true
-            (cd ${{ env.TF_WORKDIR }} && terraform output -json) || true
-          fi
-          if [ -z "${{ steps.outs.outputs.ecs_task_family }}" ] || [ "${{ steps.outs.outputs.ecs_task_family }}" = "null" ]; then
-            missing+=(ecs_task_family)
-          fi
-          if [ -z "${{ steps.outs.outputs.ecs_cluster_name }}" ] || [ "${{ steps.outs.outputs.ecs_cluster_name }}" = "null" ]; then
-            missing+=(ecs_cluster_name)
-          fi
+          [ -z "${{ steps.outs.outputs.ecr_repository_url }}" ] && missing+=(ecr_repository_url)
+          [ -z "${{ steps.outs.outputs.ecs_task_family }}" ] && missing+=(ecs_task_family)
+          [ -z "${{ steps.outs.outputs.ecs_cluster_name }}" ] && missing+=(ecs_cluster_name)
           if [ ${#missing[@]} -gt 0 ]; then
             echo "Missing required Terraform outputs: ${missing[*]}" >&2
             exit 1
@@ -191,10 +185,11 @@ jobs:
   build_and_push_image:
     name: Build & Push Image
     runs-on: ubuntu-latest
-    outputs:
-      image_tag: ${{ steps.image_tag.outputs.IMAGE_TAG }}
     needs: [get_terraform_outputs]
     permissions: { id-token: write, contents: read }
+    outputs:
+      image_tag: ${{ steps.image_meta.outputs.IMAGE_TAG }}
+      image_uri: ${{ steps.image_meta.outputs.IMAGE_URI }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
@@ -210,38 +205,29 @@ jobs:
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Determine image tag (short sha)
-        id: image_tag
+      - name: Determine image metadata
+        id: image_meta
         run: |
           set -euo pipefail
-          # Compute a short image tag so image names are shorter and friendlier
           full_sha="${GITHUB_SHA:-${{ github.sha }}}"
           short_sha="${full_sha:0:7}"
+          ecr_repo="${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}"
+          if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
+            echo "ECR repository URL missing from get_terraform_outputs." >&2
+            exit 1
+          fi
           echo "IMAGE_TAG=${short_sha}" >> "$GITHUB_OUTPUT"
+          echo "IMAGE_URI=${ecr_repo}:${short_sha}" >> "$GITHUB_OUTPUT"
 
       - name: Build & push
         env:
-          ECR_REPO_URL: ${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}
-          IMAGE_TAG: ${{ steps.image_tag.outputs.IMAGE_TAG }}
+          IMAGE_URI: ${{ steps.image_meta.outputs.IMAGE_URI }}
         run: |
           set -euo pipefail
-          # Defensive checks: ensure we have an ECR repo URL and image tag before trying to build/push
-          if [ -z "${ECR_REPO_URL:-}" ] || [ "${ECR_REPO_URL:-}" = "null" ]; then
-            echo "Error: ECR_REPO_URL is empty. Terraform did not output an ECR repository URL for this environment."
-            echo "Possible fixes: run the infrastructure workflow for the '${{ env.DEPLOY_ENV }}' environment, or import an existing ECR repo into the Terraform 'production' workspace so the output 'ecr_repository_url' is populated."
-            echo "Terraform output 'ecr_repository_url' was: '${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}'" >&2 || true
-            exit 1
-          fi
-          if [ -z "${IMAGE_TAG:-}" ]; then
-            echo "Error: IMAGE_TAG is empty. Cannot build image with empty tag." >&2
-            exit 1
-          fi
-
-          IMAGE="${ECR_REPO_URL}:${IMAGE_TAG}"
-          echo "Building Docker image: $IMAGE"
-          docker build --pull --tag "$IMAGE" .
-          echo "Pushing Docker image: $IMAGE"
-          docker push "$IMAGE"
+          echo "Building ${IMAGE_URI}"
+          docker build --pull --tag "${IMAGE_URI}" .
+          echo "Pushing ${IMAGE_URI}"
+          docker push "${IMAGE_URI}"
 
   deploy_ecs:
     name: Deploy to ECS
@@ -266,13 +252,10 @@ jobs:
         id: email_config
         run: |
           set -euo pipefail
-          # Default to user-provided values
           EMAIL_HOST="${{ github.event.inputs.email_host }}"
           EMAIL_PORT="${{ github.event.inputs.email_port }}"
           EMAIL_HOST_USER="${{ github.event.inputs.email_host_user }}"
           EMAIL_HOST_PASSWORD="${{ github.event.inputs.email_host_password }}"
-
-          # Override with SES SMTP if available (check if not null/empty)
           SES_USERNAME="${{ needs.get_terraform_outputs.outputs.ses_smtp_username }}"
           SES_PASSWORD="${{ needs.get_terraform_outputs.outputs.ses_smtp_password }}"
           if [ -n "$SES_USERNAME" ] && [ -n "$SES_PASSWORD" ] && [ "$SES_USERNAME" != "null" ] && [ "$SES_PASSWORD" != "null" ]; then
@@ -284,7 +267,6 @@ jobs:
           else
             echo "Using user-provided email settings"
           fi
-
           echo "email_host=$EMAIL_HOST" >> "$GITHUB_OUTPUT"
           echo "email_port=$EMAIL_PORT" >> "$GITHUB_OUTPUT"
           echo "email_host_user=$EMAIL_HOST_USER" >> "$GITHUB_OUTPUT"
@@ -293,7 +275,7 @@ jobs:
       - name: Register task definitions (API & Celery) using TF outputs
         id: register_td
         env:
-          NEW_IMAGE: ${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}:${{ needs.build_and_push_image.outputs.image_tag }}
+          NEW_IMAGE: ${{ needs.build_and_push_image.outputs.image_uri }}
           ECS_TASK_FAMILY: ${{ needs.get_terraform_outputs.outputs.ecs_task_family }}
           CELERY_TASK_FAMILY: ${{ needs.get_terraform_outputs.outputs.celery_task_family }}
           BASE_ENV_JSON: ${{ needs.get_terraform_outputs.outputs.application_environment }}
@@ -312,6 +294,11 @@ jobs:
           EMAIL_HOST_PASSWORD: ${{ steps.email_config.outputs.email_host_password }}
         run: |
           set -euo pipefail
+
+          if [ -z "${NEW_IMAGE:-}" ] || [ "${NEW_IMAGE:-}" = "null" ]; then
+            echo "Error: NEW_IMAGE (image URI) not provided from build step." >&2
+            exit 1
+          fi
 
           make_env_json() {
             local base_json="${BASE_ENV_JSON:-{}}"
@@ -342,9 +329,7 @@ jobs:
             aws ecs describe-task-definition --task-definition "$family" --query 'taskDefinition' > "$file.json"
             env_json="$(make_env_json)"
 
-            # Build secrets array for containerDefinition - use SSM/Secrets ARNs or names
             secrets_json="[]"
-            # Helper to append a secret mapping if both name and valueFrom are present
             add_secret() {
               local name="$1" value_from="$2"
               if [ -n "$name" ] && [ -n "$value_from" ] && [ "$value_from" != "null" ]; then
@@ -352,79 +337,62 @@ jobs:
               fi
             }
 
-            # Determine valueFrom references. Prefer full ARN if TF provides it, otherwise assume SSM parameter name and build SSM parameter ARN
-            # DB
-            if [ -n "${DB_SSM_NAME:-}" ] && [ "${DB_SSM_NAME:-}" != "" ] && [ "${DB_SSM_NAME:-}" != "null" ]; then
+            # Build SSM ARNs if needed
+            if [ -n "${DB_SSM_NAME:-}" ] && [ "${DB_SSM_NAME:-}" != "null" ]; then
               DB_VALFROM="$DB_SSM_NAME"
-              # Normalize: ensure parameter name starts with '/'
-              if [[ "$DB_VALFROM" != /* ]]; then
-                DB_VALFROM="/${DB_VALFROM}"
-              fi
-              # If it's not already an ARN, build the ARN using the resolved AWS account id and region
+              if [[ "$DB_VALFROM" != /* ]]; then DB_VALFROM="/${DB_VALFROM}"; fi
               if [[ "$DB_VALFROM" != arn:* ]]; then
                 DB_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${DB_VALFROM}"
               fi
               add_secret "DATABASE_URL" "$DB_VALFROM"
             fi
 
-            # Django secret
-            if [ -n "${DJANGO_SECRET_SSM:-}" ] && [ "${DJANGO_SECRET_SSM:-}" != "" ] && [ "${DJANGO_SECRET_SSM:-}" != "null" ]; then
+            if [ -n "${DJANGO_SECRET_SSM:-}" ] && [ "${DJANGO_SECRET_SSM:-}" != "null" ]; then
               DS_VALFROM="$DJANGO_SECRET_SSM"
-              if [[ "$DS_VALFROM" != /* ]]; then
-                DS_VALFROM="/${DS_VALFROM}"
-              fi
+              if [[ "$DS_VALFROM" != /* ]]; then DS_VALFROM="/${DS_VALFROM}"; fi
               if [[ "$DS_VALFROM" != arn:* ]]; then
                 DS_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${DS_VALFROM}"
               fi
               add_secret "DJANGO_SECRET_KEY" "$DS_VALFROM"
             fi
 
-            # Redis auth
-            if [ -n "${REDIS_AUTH_SSM:-}" ] && [ "${REDIS_AUTH_SSM:-}" != "" ] && [ "${REDIS_AUTH_SSM:-}" != "null" ]; then
+            if [ -n "${REDIS_AUTH_SSM:-}" ] && [ "${REDIS_AUTH_SSM:-}" != "null" ]; then
               R_VALFROM="$REDIS_AUTH_SSM"
-              if [[ "$R_VALFROM" != /* ]]; then
-                R_VALFROM="/${R_VALFROM}"
-              fi
+              if [[ "$R_VALFROM" != /* ]]; then R_VALFROM="/${R_VALFROM}"; fi
               if [[ "$R_VALFROM" != arn:* ]]; then
                 R_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${R_VALFROM}"
               fi
               add_secret "REDIS_AUTH_TOKEN" "$R_VALFROM"
-              # If we also have endpoint, set REDIS_URL as a non-secret derived value referencing the endpoint and secret via task-side templating
-              if [ -n "${REDIS_ENDPOINT:-}" ] && [ "${REDIS_ENDPOINT:-}" != "" ] && [ "${REDIS_ENDPOINT:-}" != "null" ]; then
-                # Keep REDIS_ENDPOINT as environment; the app can construct URL using REDIS_AUTH_TOKEN
+              if [ -n "${REDIS_ENDPOINT:-}" ] && [ "${REDIS_ENDPOINT:-}" != "null" ]; then
                 env_json=$(jq -c --arg k "REDIS_ENDPOINT" --arg v "${REDIS_ENDPOINT}" '. + [{name:$k, value:$v}]' <<<"$env_json")
               fi
             fi
 
-            # Stripe secrets
-            if [ -n "${STRIPE_SECRET_SSM:-}" ] && [ "${STRIPE_SECRET_SSM:-}" != "" ] && [ "${STRIPE_SECRET_SSM:-}" != "null" ]; then
+            if [ -n "${STRIPE_SECRET_SSM:-}" ] && [ "${STRIPE_SECRET_SSM:-}" != "null" ]; then
               S_STR_VALFROM="$STRIPE_SECRET_SSM"
-              if [[ "$S_STR_VALFROM" != /* ]]; then
-                S_STR_VALFROM="/${S_STR_VALFROM}"
-              fi
+              if [[ "$S_STR_VALFROM" != /* ]]; then S_STR_VALFROM="/${S_STR_VALFROM}"; fi
               if [[ "$S_STR_VALFROM" != arn:* ]]; then
                 S_STR_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${S_STR_VALFROM}"
               fi
               add_secret "STRIPE_SECRET_KEY" "$S_STR_VALFROM"
             fi
-            if [ -n "${STRIPE_WEBHOOK_SSM:-}" ] && [ "${STRIPE_WEBHOOK_SSM:-}" != "" ] && [ "${STRIPE_WEBHOOK_SSM:-}" != "null" ]; then
+
+            if [ -n "${STRIPE_WEBHOOK_SSM:-}" ] && [ "${STRIPE_WEBHOOK_SSM:-}" != "null" ]; then
               S_WEB_VALFROM="$STRIPE_WEBHOOK_SSM"
-              if [[ "$S_WEB_VALFROM" != /* ]]; then
-                S_WEB_VALFROM="/${S_WEB_VALFROM}"
-              fi
+              if [[ "$S_WEB_VALFROM" != /* ]]; then S_WEB_VALFROM="/${S_WEB_VALFROM}"; fi
               if [[ "$S_WEB_VALFROM" != arn:* ]]; then
                 S_WEB_VALFROM="arn:aws:ssm:${AWS_REGION}:${AWS_ACCOUNT_ID}:parameter${S_WEB_VALFROM}"
               fi
               add_secret "STRIPE_WEBHOOK_SECRET" "$S_WEB_VALFROM"
             fi
 
-            # Register task definition: inject image, environment and secrets
-            jq --arg img "$NEW_IMAGE" --argjson env "$env_json" --argjson secrets "$secrets_json" \
+            jq --arg img "${NEW_IMAGE}" --argjson env "$env_json" --argjson secrets "$secrets_json" \
               '.containerDefinitions[0].image = $img
                | .containerDefinitions[0].environment = $env
                | .containerDefinitions[0].secrets = $secrets
                | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)' \
               "$file.json" > "${file}-new.json"
+
             aws ecs register-task-definition \
               --cli-input-json file://"${file}-new.json" \
               --query 'taskDefinition.taskDefinitionArn' --output text
