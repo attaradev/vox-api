@@ -55,6 +55,8 @@ jobs:
     name: Terraform plan/apply
     runs-on: ubuntu-latest
     permissions: { id-token: write, contents: read }
+    env:
+      DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
@@ -78,6 +80,8 @@ jobs:
     name: Get Terraform Outputs
     runs-on: ubuntu-latest
     permissions: { id-token: write, contents: read }
+    env:
+      DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
     needs: [terraform]
     outputs:
       ecs_cluster_name: ${{ steps.outs.outputs.ecs_cluster_name }}
