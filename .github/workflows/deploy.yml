@@ -57,6 +57,8 @@ jobs:
     permissions: { id-token: write, contents: read }
     env:
       DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
+      TF_VAR_environment: ${{ github.event.inputs.environment || 'production' }}
+      TF_VAR_short_environment: ${{ github.event.inputs.environment || 'production' }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
@@ -82,6 +84,8 @@ jobs:
     permissions: { id-token: write, contents: read }
     env:
       DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
+      TF_VAR_environment: ${{ github.event.inputs.environment || 'production' }}
+      TF_VAR_short_environment: ${{ github.event.inputs.environment || 'production' }}
     needs: [terraform]
     outputs:
       ecs_cluster_name: ${{ steps.outs.outputs.ecs_cluster_name }}
