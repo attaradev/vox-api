@@ -43,6 +43,16 @@ variable "db_skip_final_snapshot" {
   default     = true
 }
 
+variable "db_final_snapshot_identifier" {
+  description = "Identifier to use for the final DB snapshot when skip_final_snapshot is false. Required when skip_final_snapshot = false."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.db_skip_final_snapshot || (trim(var.db_final_snapshot_identifier) != "")
+    error_message = "db_final_snapshot_identifier must be provided when db_skip_final_snapshot is false"
+  }
+}
+
 variable "redis_node_type" {
   description = "Node type for Redis cluster"
   type        = string
