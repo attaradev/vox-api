@@ -210,6 +210,8 @@ jobs:
 
       - name: Determine image metadata
         id: image_meta
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           set -euo pipefail
           full_sha="${GITHUB_SHA:-${{ github.sha }}}"
@@ -221,14 +223,14 @@ jobs:
           # Fallback: compose from login registry + TF repo name
           if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
             repo_name="${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}"
-            registry="${{ steps.login-ecr.outputs.registry }}"
+            registry="${REGISTRY:-}"
             # If TF does not expose ecr_repository_name, default to PROJECT_NAME (matches storage module behavior)
             if [ -z "${repo_name}" ] || [ "${repo_name}" = "null" ]; then
               repo_name="${PROJECT_NAME:-vox-api}"
             fi
             if [ -z "${registry}" ]; then
               echo "ECR registry missing from login step; cannot compose repository URL." >&2
-              echo "Debug: ecr_repository_url='${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}', ecr_repository_name='${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}', registry='${{ steps.login-ecr.outputs.registry }}'" >&2
+              echo "Debug: ecr_repository_url='${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}', ecr_repository_name='${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}', registry='${REGISTRY:-}'" >&2
               exit 1
             fi
             ecr_repo="${registry}/${repo_name}"
@@ -312,8 +314,50 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Compute NEW_IMAGE at runtime if it wasn't provided by the build job.
           if [ -z "${NEW_IMAGE:-}" ] || [ "${NEW_IMAGE:-}" = "null" ]; then
-            echo "Error: NEW_IMAGE (image URI) not provided from build step." >&2
+            echo "NEW_IMAGE not provided by build job; attempting to compute from available data..."
+
+            # 1) Try the TF outputs job value (may be empty if outputs job didn't populate it)
+            ecr_repo="${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}"
+
+            # 2) If empty, try reading from terraform state directly (infra dir)
+            if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
+              if [ -d "${{ env.TF_WORKDIR }}" ]; then
+                ecr_repo=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_repository_url 2>/dev/null || true)
+              fi
+            fi
+
+            # 3) If still empty, try composing registry + repo name (repo name fallback to PROJECT_NAME)
+            if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
+              repo_name="${{ needs.get_terraform_outputs.outputs.ecr_repository_name }}"
+              if [ -z "${repo_name}" ] || [ "${repo_name}" = "null" ]; then
+                repo_name="${PROJECT_NAME:-vox-api}"
+              fi
+              registry="${REGISTRY:-}"
+              if [ -z "${registry}" ]; then
+                # Try to obtain registry from TF or fail if not available
+                if [ -d "${{ env.TF_WORKDIR }}" ]; then
+                  registry=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_registry 2>/dev/null || true) || true
+                fi
+              fi
+              if [ -n "${registry}" ]; then
+                ecr_repo="${registry}/${repo_name}"
+              fi
+            fi
+
+            # 4) Build image tag from the current SHA
+            full_sha="${GITHUB_SHA:-${{ github.sha }}}"
+            short_sha="${full_sha:0:7}"
+
+            if [ -n "${ecr_repo}" ] && [ "${ecr_repo}" != "null" ]; then
+              NEW_IMAGE="${ecr_repo}:${short_sha}"
+              echo "Computed NEW_IMAGE=${NEW_IMAGE}"
+            fi
+          fi
+
+          if [ -z "${NEW_IMAGE:-}" ] || [ "${NEW_IMAGE:-}" = "null" ]; then
+            echo "Error: NEW_IMAGE (image URI) not provided from build step and could not be computed." >&2
             exit 1
           fi
 
