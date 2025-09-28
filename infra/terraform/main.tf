@@ -221,6 +221,7 @@ module "network" {
   flow_logs_log_group_name  = var.flow_logs_log_group_name
   adopt_existing_flow_logs  = var.adopt_existing_flow_logs
   tags                      = local.tags
+  container_port            = var.container_port
 }
 
 # -----------------------------------------------------------------------------
@@ -288,6 +289,7 @@ module "ecs" {
   ecr_repository_name       = module.storage.ecr_repository_name
   image_tag                 = var.image_tag
   aws_region                = var.aws_region
+  enable_https_listener     = var.enable_https_listener
   ecs_log_group_name        = "${local.name_prefix}-ecs-logs"
   vpc_id                    = module.network.vpc_id
   private_subnet_ids        = module.network.private_app_subnet_ids
@@ -303,4 +305,8 @@ module "ecs" {
   depends_on                = [module.storage]
   tags                      = local.tags
   task_role_policy_arns     = local.ecs_task_role_policy_map
+  celery_desired_count      = var.celery_desired_count
+  celery_cpu                = var.celery_cpu
+  celery_memory             = var.celery_memory
+  celery_command            = var.celery_command
 }

@@ -80,6 +80,12 @@ variable "ecr_repository_name" {
   default     = ""
 }
 
+variable "enable_https_listener" {
+  description = "Whether to create an HTTPS listener and redirect HTTP traffic when a certificate is supplied"
+  type        = bool
+  default     = false
+}
+
 variable "container_port" {
   description = "Container port exposed by the service"
   type        = number
@@ -97,8 +103,6 @@ variable "desired_count" {
   type        = number
   default     = 2
 }
-
-// ...existing code...
 
 variable "memory" {
   description = "Memory (MB) for the Fargate task"
@@ -128,6 +132,30 @@ variable "environment_secrets" {
   description = "Map of environment variable names to SSM parameter names or ARNs. Values may be full ARN or a parameter name (with or without leading /)."
   type        = map(string)
   default     = {}
+}
+
+variable "celery_desired_count" {
+  description = "Desired number of Celery worker tasks (0 disables the Celery service)"
+  type        = number
+  default     = 0
+}
+
+variable "celery_cpu" {
+  description = "CPU units allocated to the Celery worker task definition"
+  type        = number
+  default     = 512
+}
+
+variable "celery_memory" {
+  description = "Memory (MiB) allocated to the Celery worker task definition"
+  type        = number
+  default     = 1024
+}
+
+variable "celery_command" {
+  description = "Command override for the Celery worker container"
+  type        = list(string)
+  default     = ["celery", "-A", "vox_api", "worker", "--loglevel=info"]
 }
 
 variable "certificate_arn" {

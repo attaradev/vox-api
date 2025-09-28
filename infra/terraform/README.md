@@ -171,10 +171,11 @@ Add new modules under `modules/` and wire them in via the root `main.tf`. Follow
 - `container_image` – Optional bootstrap image URI for ECS tasks.
 - `availability_zones` – Control which AZs host subnets.
 - `alb_allowed_cidrs` – Restrict incoming traffic to the ALB.
+- `enable_https_listener` / `certificate_arn` – Toggle HTTPS support and reference the ACM certificate for the ALB.
 - `ecs_task_environment` – Additional non-sensitive environment variables for containers.
 - `ecs_task_secrets` – Map of env var names to existing SSM parameters for sensitive values.
 - `django_allowed_hosts` – Hostnames passed to Django's `ALLOWED_HOSTS` setting.
-- `celery_cpu`, `celery_memory`, `celery_desired_count` – Celery worker resources.
+- `celery_cpu`, `celery_memory`, `celery_desired_count`, `celery_command` – Celery worker sizing and runtime configuration.
 - `frontend_url` – Base URL for password reset and CORS.
 - `single_nat_gateway` – Share a single NAT gateway across AZs.
 - `db_*`, `redis_*`, `s3_*`, `ecr_*` variables – Tune instance shapes, retention, encryption, and lifecycle policies.

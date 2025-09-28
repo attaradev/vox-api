@@ -14,12 +14,16 @@ locals {
   container_image_parts = length(local.container_image_input) > 0 ? split(":", local.container_image_input) : []
   container_image_base  = length(local.container_image_parts) > 1 ? join(":", slice(local.container_image_parts, 0, length(local.container_image_parts) - 1)) : local.container_image_input
   image_tag_trimmed     = trimspace(var.image_tag)
-  image_repo_for_tag    = length(trimspace(local.container_image_base)) > 0 ? trimspace(local.container_image_base) : trimspace(var.ecr_repository_name)
+  fallback_repo_name    = length(trimspace(var.ecr_repository_name)) > 0 ? trimspace(var.ecr_repository_name) : var.name_prefix
+  image_repo_for_tag    = length(trimspace(local.container_image_base)) > 0 ? trimspace(local.container_image_base) : trimspace(local.fallback_repo_name)
+  image_repo_effective  = length(local.image_repo_for_tag) > 0 ? local.image_repo_for_tag : local.fallback_repo_name
   container_image_effective = (
-    length(local.image_tag_trimmed) > 0 && length(local.image_repo_for_tag) > 0
-      ? format("%s:%s", local.image_repo_for_tag, local.image_tag_trimmed)
-      : local.container_image_input
+    length(local.image_tag_trimmed) > 0
+    ? format("%s:%s", local.image_repo_effective, local.image_tag_trimmed)
+    : local.container_image_input
   )
+  https_enabled             = var.enable_https_listener && length(trimspace(var.certificate_arn)) > 0
+  effective_certificate_arn = local.https_enabled ? trimspace(var.certificate_arn) : ""
 }
 
 data "aws_elb_service_account" "this" {}
@@ -189,10 +193,10 @@ resource "aws_lb_listener" "http" {
   protocol          = "HTTP"
 
   default_action {
-    type = var.certificate_arn != "" ? "redirect" : "forward"
+    type = local.https_enabled ? "redirect" : "forward"
 
     dynamic "redirect" {
-      for_each = var.certificate_arn != "" ? [1] : []
+      for_each = local.https_enabled ? [1] : []
       content {
         port        = "443"
         protocol    = "HTTPS"
@@ -201,7 +205,7 @@ resource "aws_lb_listener" "http" {
     }
 
     dynamic "forward" {
-      for_each = var.certificate_arn != "" ? [] : [1]
+      for_each = local.https_enabled ? [] : [1]
       content {
         target_group {
           arn = aws_lb_target_group.this.arn
@@ -212,13 +216,13 @@ resource "aws_lb_listener" "http" {
 }
 
 resource "aws_lb_listener" "https" {
-  count = var.certificate_arn != "" ? 1 : 0
+  count = local.https_enabled ? 1 : 0
 
   load_balancer_arn = aws_lb.this.arn
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = var.certificate_arn
+  certificate_arn   = local.effective_certificate_arn
 
   default_action {
     type             = "forward"
@@ -358,6 +362,95 @@ resource "aws_appautoscaling_policy" "memory" {
       predefined_metric_type = "ECSServiceAverageMemoryUtilization"
     }
   }
+}
+
+resource "aws_cloudwatch_log_group" "celery" {
+  count             = var.celery_desired_count > 0 ? 1 : 0
+  name              = "/aws/ecs/${var.name_prefix}-celery"
+  retention_in_days = var.log_retention_in_days
+
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-celery-logs"
+  })
+}
+
+resource "aws_ecs_task_definition" "celery" {
+  count                    = var.celery_desired_count > 0 ? 1 : 0
+  family                   = "${var.name_prefix}-celery"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = tostring(var.celery_cpu)
+  memory                   = tostring(var.celery_memory)
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  runtime_platform {
+    cpu_architecture        = "X86_64"
+    operating_system_family = "LINUX"
+  }
+
+  container_definitions = jsonencode([
+    {
+      name      = "${var.name_prefix}-celery"
+      image     = local.container_image_effective
+      essential = true
+      command   = var.celery_command
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.celery[count.index].name
+          awslogs-region        = data.aws_region.current.name
+          awslogs-stream-prefix = "celery"
+        }
+      }
+      environment = local.environment
+      secrets     = local.secrets
+      healthCheck = {
+        command     = ["CMD-SHELL", "celery -A vox_api inspect ping --timeout=10 || exit 1"]
+        interval    = 60
+        timeout     = 10
+        retries     = 3
+        startPeriod = 120
+      }
+    }
+  ])
+
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-celery-task"
+  })
+}
+
+resource "aws_ecs_service" "celery" {
+  count            = var.celery_desired_count > 0 ? 1 : 0
+  name             = "${var.name_prefix}-celery"
+  cluster          = aws_ecs_cluster.this.id
+  task_definition  = aws_ecs_task_definition.celery[count.index].arn
+  desired_count    = var.celery_desired_count
+  launch_type      = "FARGATE"
+  platform_version = "1.4.0"
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  deployment_controller {
+    type = "ECS"
+  }
+
+  network_configuration {
+    subnets          = var.private_subnet_ids
+    security_groups  = [var.service_security_group_id]
+    assign_public_ip = var.assign_public_ip
+  }
+
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.name_prefix}-celery"
+  })
 }
 
 data "aws_region" "current" {}

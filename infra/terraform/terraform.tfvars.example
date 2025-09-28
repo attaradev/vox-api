@@ -9,6 +9,10 @@ container_image = ""
 
 alb_allowed_cidrs = ["0.0.0.0/0"]
 
+# Enable HTTPS by providing an ACM certificate ARN
+enable_https_listener = true
+certificate_arn       = "arn:aws:acm:us-east-1:123456789012:certificate/EXAMPLE"
+
 # Merge with defaults defined in variables.tf
 ecs_task_environment = {
   DJANGO_SETTINGS_MODULE = "vox_api.settings.production"
@@ -23,6 +27,10 @@ django_allowed_hosts = ["app.example.com"]
 
 stripe_secret_key = "SK_REDACTED"
 frontend_url      = "https://app.example.com"
+
+# Celery workers (set to 0 to disable the service)
+celery_desired_count = 1
+# celery_command = ["celery", "-A", "vox_api", "worker", "--loglevel=info"]
 
 # Example overrides for data tiers
 db_instance_class  = "db.t4g.small"

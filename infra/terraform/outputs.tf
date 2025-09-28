@@ -28,6 +28,11 @@ output "celery_service_name" {
   value       = try(module.ecs.celery_service_name, null)
 }
 
+output "celery_task_family" {
+  description = "Task definition family for the Celery ECS task"
+  value       = try(module.ecs.celery_task_definition_family, null)
+}
+
 output "ecs_cluster_name" {
   description = "Name of the ECS cluster"
   value       = try(module.ecs.cluster_name, null)

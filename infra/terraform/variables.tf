@@ -132,6 +132,10 @@ variable "certificate_arn" {
   description = "ACM certificate ARN used when enable_https_listener is true"
   type        = string
   default     = ""
+  validation {
+    condition     = var.enable_https_listener ? trim(var.certificate_arn) != "" : true
+    error_message = "certificate_arn must be provided when enable_https_listener is true"
+  }
 }
 
 variable "s3_force_destroy" {
@@ -320,6 +324,12 @@ variable "celery_desired_count" {
   description = "Desired Celery worker count"
   type        = number
   default     = 1
+}
+
+variable "celery_command" {
+  description = "Command override for Celery workers"
+  type        = list(string)
+  default     = ["celery", "-A", "vox_api", "worker", "--loglevel=info"]
 }
 
 variable "db_name" {

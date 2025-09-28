@@ -13,6 +13,11 @@ output "service_name" {
   description = "Name of the ECS service"
 }
 
+output "celery_service_name" {
+  value       = try(aws_ecs_service.celery[0].name, null)
+  description = "Name of the Celery ECS service (if enabled)"
+}
+
 output "task_execution_role_arn" {
   value       = aws_iam_role.execution.arn
   description = "ARN of the ECS task execution role"
@@ -26,6 +31,11 @@ output "task_role_arn" {
 output "task_definition_family" {
   value       = aws_ecs_task_definition.this.family
   description = "ECS task definition family name"
+}
+
+output "celery_task_definition_family" {
+  value       = try(aws_ecs_task_definition.celery[0].family, null)
+  description = "Celery ECS task definition family name (if enabled)"
 }
 
 output "alb_arn" {
