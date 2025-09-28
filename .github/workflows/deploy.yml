@@ -191,7 +191,6 @@ jobs:
     permissions: { id-token: write, contents: read }
     outputs:
       image_tag: ${{ steps.image_meta.outputs.IMAGE_TAG }}
-      image_uri: ${{ steps.image_meta.outputs.IMAGE_URI }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
