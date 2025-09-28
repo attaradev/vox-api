@@ -83,7 +83,8 @@ locals {
 
   django_env = local.canonical_environment == "production" || local.canonical_environment == "prod" ? "production" : (local.canonical_environment == "staging" || local.canonical_environment == "stage" || local.canonical_environment == "stg" ? "staging" : "development")
 
-  allowed_hosts_list = length(var.django_allowed_hosts) > 0 ? var.django_allowed_hosts : []
+  allowed_hosts_base = length(var.django_allowed_hosts) > 0 ? var.django_allowed_hosts : []
+  allowed_hosts_list = distinct(concat(local.allowed_hosts_base, ["*.elb.amazonaws.com"]))
   allowed_hosts_csv  = length(local.allowed_hosts_list) > 0 ? join(",", local.allowed_hosts_list) : ""
 
   ecs_environment_base = merge(
@@ -101,6 +102,9 @@ locals {
       REDIS_HOST              = module.storage.redis_primary_endpoint
       REDIS_PORT              = "6379"
       USE_REDIS_FOR_CELERY    = "1"
+      ALLOW_BIND_ALL_HOSTS    = "1"
+      RUN_DB_MIGRATIONS       = var.ecs_run_db_migrations_default ? "1" : "0"
+      SERVICE_ROLE            = "api"
     },
     length(local.allowed_hosts_csv) > 0 ? { DJANGO_ALLOWED_HOSTS = local.allowed_hosts_csv } : {},
     var.ecs_task_environment
@@ -286,27 +290,29 @@ module "ecs" {
   environment_secrets = local.ecs_environment_secrets
   # Image tag and ECR repo allow CI to drive new task definition revisions by calling
   # terraform apply -var 'image_tag=<shortsha>'
-  ecr_repository_name       = module.storage.ecr_repository_name
-  image_tag                 = var.image_tag
-  aws_region                = var.aws_region
-  enable_https_listener     = var.enable_https_listener
-  ecs_log_group_name        = "${local.name_prefix}-ecs-logs"
-  vpc_id                    = module.network.vpc_id
-  private_subnet_ids        = module.network.private_app_subnet_ids
-  public_subnet_ids         = module.network.public_subnet_ids
-  alb_security_group_id     = module.network.alb_security_group_id
-  service_security_group_id = module.network.ecs_security_group_id
-  container_port            = var.container_port
-  desired_count             = var.ecs_desired_count
-  log_retention_in_days     = var.ecs_log_retention_in_days
-  certificate_arn           = var.certificate_arn
-  ecs_cpu_high_alarm_name   = "${local.name_prefix}-ecs-cpu-high"
-  ecs_unhealthy_alarm_name  = "${local.name_prefix}-ecs-unhealthy"
-  depends_on                = [module.storage]
-  tags                      = local.tags
-  task_role_policy_arns     = local.ecs_task_role_policy_map
-  celery_desired_count      = var.celery_desired_count
-  celery_cpu                = var.celery_cpu
-  celery_memory             = var.celery_memory
-  celery_command            = var.celery_command
+  ecr_repository_name                   = module.storage.ecr_repository_name
+  image_tag                             = var.image_tag
+  aws_region                            = var.aws_region
+  enable_https_listener                 = var.enable_https_listener
+  ecs_log_group_name                    = "${local.name_prefix}-ecs-logs"
+  vpc_id                                = module.network.vpc_id
+  private_subnet_ids                    = module.network.private_app_subnet_ids
+  public_subnet_ids                     = module.network.public_subnet_ids
+  alb_security_group_id                 = module.network.alb_security_group_id
+  service_security_group_id             = module.network.ecs_security_group_id
+  container_port                        = var.container_port
+  desired_count                         = var.ecs_desired_count
+  log_retention_in_days                 = var.ecs_log_retention_in_days
+  certificate_arn                       = var.certificate_arn
+  ecs_cpu_high_alarm_name               = "${local.name_prefix}-ecs-cpu-high"
+  ecs_unhealthy_alarm_name              = "${local.name_prefix}-ecs-unhealthy"
+  depends_on                            = [module.storage]
+  tags                                  = local.tags
+  task_role_policy_arns                 = local.ecs_task_role_policy_map
+  celery_desired_count                  = var.celery_desired_count
+  celery_cpu                            = var.celery_cpu
+  celery_memory                         = var.celery_memory
+  celery_command                        = var.celery_command
+  celery_environment_overrides          = merge({ SERVICE_ROLE = "celery", SKIP_DB_MIGRATIONS = "1" }, var.celery_environment_overrides)
+  ecs_health_check_grace_period_seconds = var.ecs_health_check_grace_period_seconds
 }

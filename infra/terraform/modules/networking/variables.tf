@@ -100,5 +100,5 @@ variable "enable_https_listener" {
 variable "container_port" {
   description = "Port that the ECS tasks expose and ALB targets"
   type        = number
-  default     = 8000
+  default     = 80
 }

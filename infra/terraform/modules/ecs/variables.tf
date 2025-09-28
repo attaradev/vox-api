@@ -89,13 +89,49 @@ variable "enable_https_listener" {
 variable "container_port" {
   description = "Container port exposed by the service"
   type        = number
-  default     = 8000
+  default     = 80
 }
 
 variable "health_check_path" {
   description = "Path used by the ALB target group health check"
   type        = string
-  default     = "/"
+  default     = "/healthz"
+}
+
+variable "container_health_command" {
+  description = "Custom health check command for the application container"
+  type        = list(string)
+  default     = []
+}
+
+variable "container_health_interval" {
+  description = "Seconds between container health checks"
+  type        = number
+  default     = 30
+}
+
+variable "container_health_timeout" {
+  description = "Timeout in seconds for container health checks"
+  type        = number
+  default     = 5
+}
+
+variable "container_health_retries" {
+  description = "Number of consecutive failures before container is marked unhealthy"
+  type        = number
+  default     = 3
+}
+
+variable "container_health_start_period" {
+  description = "Grace period in seconds before starting container health checks"
+  type        = number
+  default     = 180
+}
+
+variable "ecs_health_check_grace_period_seconds" {
+  description = "Grace period for ECS service health checks"
+  type        = number
+  default     = 300
 }
 
 variable "desired_count" {
@@ -196,6 +232,13 @@ variable "task_role_policy_arns" {
 
 variable "tags" {
   description = "Tags to propagate to ECS resources"
+  type        = map(string)
+  default     = {}
+}
+
+
+variable "celery_environment_overrides" {
+  description = "Additional environment variables applied to the Celery worker container"
   type        = map(string)
   default     = {}
 }

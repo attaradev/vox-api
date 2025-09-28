@@ -291,8 +291,14 @@ CELERY_TASK_EAGER_PROPAGATES = True
 # tooling like Swagger UI and Django's test client don't trip DisallowedHost.
 _raw_allowed_hosts = env("DJANGO_ALLOWED_HOSTS", "0.0.0.0,localhost").split(",")
 _clean_allowed_hosts = [host.strip() for host in _raw_allowed_hosts if host.strip()]
+_base_hosts = ["localhost", "127.0.0.1"]
 if DEBUG:
-    _clean_allowed_hosts.extend(["127.0.0.1", "testserver"])
+    _base_hosts.append("testserver")
+_clean_allowed_hosts.extend(_base_hosts)
+
+if env_bool("ALLOW_BIND_ALL_HOSTS", False):
+    _clean_allowed_hosts.append("0.0.0.0")  # nosec B104
+
 ALLOWED_HOSTS = list(dict.fromkeys(_clean_allowed_hosts))
 
 

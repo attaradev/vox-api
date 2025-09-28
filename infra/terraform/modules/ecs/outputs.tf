@@ -67,3 +67,8 @@ output "access_log_bucket_name" {
   value       = aws_s3_bucket.access_logs.bucket
   description = "S3 bucket receiving ALB access logs"
 }
+
+output "api_container_name" {
+  value       = local.container_name
+  description = "Name of the API container within the task definition"
+}

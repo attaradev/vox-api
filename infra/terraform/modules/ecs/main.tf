@@ -1,8 +1,11 @@
 
 
 locals {
-  container_name = "${var.name_prefix}-api"
-  environment    = [for k, v in var.environment : { name = k, value = v }]
+  container_name         = "${var.name_prefix}-api"
+  base_environment_map   = var.environment
+  environment            = [for k, v in local.base_environment_map : { name = k, value = v }]
+  celery_environment_map = merge(local.base_environment_map, var.celery_environment_overrides)
+  celery_environment     = [for k, v in local.celery_environment_map : { name = k, value = v }]
   # Build secrets array for ECS task definition from map of env name => ssm param/arn
   secrets = [for k, v in var.environment_secrets :
     {
@@ -22,6 +25,12 @@ locals {
     ? format("%s:%s", local.image_repo_effective, local.image_tag_trimmed)
     : local.container_image_input
   )
+  container_health_command = length(var.container_health_command) > 0 ? var.container_health_command : [
+    "CMD-SHELL",
+    format("curl -f http://localhost:%d%s || exit 1", var.container_port, var.health_check_path)
+  ]
+  target_group_prefix_raw  = trim(substr(replace(var.name_prefix, "-", ""), 0, 5))
+  target_group_prefix       = length(local.target_group_prefix_raw) > 0 ? local.target_group_prefix_raw : "tg"
   https_enabled             = var.enable_https_listener && length(trimspace(var.certificate_arn)) > 0
   effective_certificate_arn = local.https_enabled ? trimspace(var.certificate_arn) : ""
 }
@@ -165,7 +174,7 @@ resource "aws_lb" "this" {
 }
 
 resource "aws_lb_target_group" "this" {
-  name        = "${substr(var.name_prefix, 0, 20)}-tg"
+  name_prefix = "${local.target_group_prefix}-"
   port        = var.container_port
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
@@ -185,6 +194,9 @@ resource "aws_lb_target_group" "this" {
   tags = merge(var.tags, {
     Name = "${var.name_prefix}-tg"
   })
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_lb_listener" "http" {
@@ -264,13 +276,14 @@ resource "aws_ecs_task_definition" "this" {
           awslogs-stream-prefix = "ecs"
         }
       }
-      environment = local.environment
+      environment = local.celery_environment
       secrets     = local.secrets
       healthCheck = {
-        command  = ["CMD-SHELL", "curl -f http://localhost:${var.container_port}${var.health_check_path} || exit 1"]
-        interval = 30
-        timeout  = 5
-        retries  = 3
+        command     = local.container_health_command
+        interval    = var.container_health_interval
+        timeout     = var.container_health_timeout
+        retries     = var.container_health_retries
+        startPeriod = var.container_health_start_period
       }
     }
   ])
@@ -297,7 +310,7 @@ resource "aws_ecs_service" "this" {
     type = "ECS"
   }
 
-  health_check_grace_period_seconds = 120
+  health_check_grace_period_seconds = var.ecs_health_check_grace_period_seconds
 
   network_configuration {
     subnets          = var.private_subnet_ids

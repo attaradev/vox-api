@@ -101,7 +101,7 @@ variable "create_vpc_endpoints" {
 variable "container_port" {
   description = "Port the application container listens on"
   type        = number
-  default     = 8000
+  default     = 80
 }
 
 variable "health_check_path" {
@@ -114,6 +114,18 @@ variable "container_image" {
   description = "Optional full URI to the container image for the API service"
   type        = string
   default     = ""
+}
+
+variable "ecs_run_db_migrations_default" {
+  description = "Whether ECS tasks run Django migrations during startup"
+  type        = bool
+  default     = false
+}
+
+variable "ecs_health_check_grace_period_seconds" {
+  description = "Grace period (seconds) before ECS considers tasks for health checks"
+  type        = number
+  default     = 300
 }
 
 variable "alb_allowed_cidrs" {
@@ -575,4 +587,10 @@ variable "monitoring_period" {
   description = "Alarm evaluation period in seconds"
   type        = number
   default     = 60
+}
+
+variable "celery_environment_overrides" {
+  description = "Additional environment overrides applied to the Celery worker containers"
+  type        = map(string)
+  default     = {}
 }

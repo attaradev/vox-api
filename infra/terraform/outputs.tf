@@ -119,3 +119,18 @@ output "application_environment_secrets" {
   description = "Map of sensitive environment variable names to the SSM parameters that store their values."
   value       = local.application_environment_secrets
 }
+
+output "ecs_service_security_group_id" {
+  description = "Security group ID used by the ECS service"
+  value       = module.network.ecs_security_group_id
+}
+
+output "private_app_subnet_ids" {
+  description = "Private application subnet IDs"
+  value       = module.network.private_app_subnet_ids
+}
+
+output "ecs_api_container_name" {
+  description = "Container name for the primary API task"
+  value       = module.ecs.api_container_name
+}
