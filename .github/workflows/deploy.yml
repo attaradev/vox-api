@@ -31,6 +31,10 @@ on:
         description: "Comma-separated list of allowed hosts"
         required: false
         default: "localhost,127.0.0.1"
+      auto_apply:
+        description: "If true, run 'terraform apply' after planning"
+        required: false
+        default: "false"
 
 concurrency:
   group: deploy-${{ github.workflow }}-${{ github.event.inputs.environment || 'production' }}-${{ github.ref }}
@@ -47,36 +51,60 @@ env:
   PROJECT_NAME: vox-api
 
 jobs:
+  terraform:
+    name: Terraform plan/apply
+    runs-on: ubuntu-latest
+    permissions: { id-token: write, contents: read }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1, persist-credentials: false }
+
+      - uses: ./.github/actions/aws-setup
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: ./.github/actions/terraform-setup
+        with:
+          working-directory: ${{ env.TF_WORKDIR }}
+          state-bucket: ${{ env.TF_STATE_BUCKET }}
+          backend-key: state/${{ env.DEPLOY_ENV }}/terraform.tfstate
+          environment: ${{ env.DEPLOY_ENV }}
+          aws-region: ${{ env.AWS_REGION }}
+          run-plan: "true"
+          run-apply: ${{ github.event.inputs.auto_apply || 'false' }}
+
   get_terraform_outputs:
     name: Get Terraform Outputs
     runs-on: ubuntu-latest
     permissions: { id-token: write, contents: read }
+    needs: [terraform]
     outputs:
-      ecs_cluster_name: ${{ steps.outs.outputs.ecs_cluster_name || '' }}
-      ecs_service_name: ${{ steps.outs.outputs.ecs_service_name || '' }}
-      ecs_task_family: ${{ steps.outs.outputs.ecs_task_family || '' }}
-      celery_service_name: ${{ steps.outs.outputs.celery_service_name || '' }}
-      celery_task_family: ${{ steps.outs.outputs.celery_task_family || '' }}
-      ecr_repository_url: ${{ steps.outs.outputs.ecr_repository_url || '' }}
-      django_secret_key_ssm_name: ${{ steps.outs.outputs.django_secret_key_ssm_name || '' }}
-      database_url: ${{ steps.outs.outputs.database_url || '' }}
-      database_url_ssm_name: ${{ steps.outs.outputs.database_url_ssm_name || '' }}
-      postgres_db: ${{ steps.outs.outputs.postgres_db || '' }}
-      postgres_user: ${{ steps.outs.outputs.postgres_user || '' }}
-      postgres_password: ${{ steps.outs.outputs.postgres_password || '' }}
-      postgres_host: ${{ steps.outs.outputs.postgres_host || '' }}
-      postgres_port: ${{ steps.outs.outputs.postgres_port || '' }}
-      redis_url: ${{ steps.outs.outputs.redis_url || '' }}
-      redis_reader_url: ${{ steps.outs.outputs.redis_reader_url || '' }}
-      redis_auth_token: ${{ steps.outs.outputs.redis_auth_token || '' }}
-      redis_primary_endpoint: ${{ steps.outs.outputs.redis_primary_endpoint || '' }}
-      static_bucket_name: ${{ steps.outs.outputs.static_bucket_name || '' }}
-      media_bucket_name: ${{ steps.outs.outputs.media_bucket_name || '' }}
-      stripe_secret_key: ${{ steps.outs.outputs.stripe_secret_key || '' }}
-      stripe_webhook_secret: ${{ steps.outs.outputs.stripe_webhook_secret || '' }}
-      ses_smtp_username: ${{ steps.outs.outputs.ses_smtp_username || '' }}
-      ses_smtp_password: ${{ steps.outs.outputs.ses_smtp_password || '' }}
-      application_environment: ${{ steps.outs.outputs.application_environment || '{}' }}
+      ecs_cluster_name: ${{ steps.outs.outputs.ecs_cluster_name }}
+      ecs_service_name: ${{ steps.outs.outputs.ecs_service_name }}
+      ecs_task_family: ${{ steps.outs.outputs.ecs_task_family }}
+      celery_service_name: ${{ steps.outs.outputs.celery_service_name }}
+      celery_task_family: ${{ steps.outs.outputs.celery_task_family }}
+      ecr_repository_url: ${{ steps.outs.outputs.ecr_repository_url }}
+      django_secret_key_ssm_name: ${{ steps.outs.outputs.django_secret_key_ssm_name }}
+      database_url: ${{ steps.outs.outputs.database_url }}
+      database_url_ssm_name: ${{ steps.outs.outputs.database_url_ssm_name }}
+      postgres_db: ${{ steps.outs.outputs.postgres_db }}
+      postgres_user: ${{ steps.outs.outputs.postgres_user }}
+      postgres_password: ${{ steps.outs.outputs.postgres_password }}
+      postgres_host: ${{ steps.outs.outputs.postgres_host }}
+      postgres_port: ${{ steps.outs.outputs.postgres_port }}
+      redis_url: ${{ steps.outs.outputs.redis_url }}
+      redis_reader_url: ${{ steps.outs.outputs.redis_reader_url }}
+      redis_auth_token: ${{ steps.outs.outputs.redis_auth_token }}
+      redis_primary_endpoint: ${{ steps.outs.outputs.redis_primary_endpoint }}
+      static_bucket_name: ${{ steps.outs.outputs.static_bucket_name }}
+      media_bucket_name: ${{ steps.outs.outputs.media_bucket_name }}
+      stripe_secret_key: ${{ steps.outs.outputs.stripe_secret_key }}
+      stripe_webhook_secret: ${{ steps.outs.outputs.stripe_webhook_secret }}
+      ses_smtp_username: ${{ steps.outs.outputs.ses_smtp_username }}
+      ses_smtp_password: ${{ steps.outs.outputs.ses_smtp_password }}
+      application_environment: ${{ steps.outs.outputs.application_environment }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1, persist-credentials: false }
@@ -102,6 +130,8 @@ jobs:
           # Discover AWS account id at runtime (needed to build SSM ARNs if TF only provides parameter names)
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
           echo "Resolved AWS account id: ${AWS_ACCOUNT_ID}"
+          # Export account id for later steps that need to build ARNs
+          echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> "$GITHUB_ENV"
           if ! terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null; then
             echo "Error: Workspace '${{ env.DEPLOY_ENV }}' does not exist. Please run the infrastructure workflow first."
             exit 1
@@ -130,6 +160,24 @@ jobs:
             echo "application_environment=$comp" >> "$GITHUB_OUTPUT"
           else
             echo "application_environment={}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate required Terraform outputs
+        run: |
+          set -euo pipefail
+          missing=()
+          if [ -z "${{ steps.outs.outputs.ecr_repository_url }}" ] || [ "${{ steps.outs.outputs.ecr_repository_url }}" = "null" ]; then
+            missing+=(ecr_repository_url)
+          fi
+          if [ -z "${{ steps.outs.outputs.ecs_task_family }}" ] || [ "${{ steps.outs.outputs.ecs_task_family }}" = "null" ]; then
+            missing+=(ecs_task_family)
+          fi
+          if [ -z "${{ steps.outs.outputs.ecs_cluster_name }}" ] || [ "${{ steps.outs.outputs.ecs_cluster_name }}" = "null" ]; then
+            missing+=(ecs_cluster_name)
+          fi
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "Missing required Terraform outputs: ${missing[*]}" >&2
+            exit 1
           fi
 
   build_and_push_image:

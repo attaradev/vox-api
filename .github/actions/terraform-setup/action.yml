@@ -17,6 +17,18 @@ inputs:
   aws-region:
     description: "AWS region"
     required: true
+  run-plan:
+    description: "If 'true', run 'terraform plan' after init"
+    required: false
+    default: "false"
+  run-apply:
+    description: "If 'true', run 'terraform apply' after planning"
+    required: false
+    default: "false"
+  plan-out:
+    description: "Name of the plan output file (used by plan/apply)"
+    required: false
+    default: "tfplan"
 
 runs:
   using: "composite"
@@ -41,4 +53,31 @@ runs:
           -backend-config="bucket=${{ inputs.state-bucket }}" \
           -backend-config="key=${{ inputs.backend-key }}" \
           -backend-config="region=${{ inputs.aws-region }}"
+      shell: bash
+
+    - name: Select / create workspace
+      if: ${{ inputs.run-plan == 'true' || inputs.run-apply == 'true' }}
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        # Ensure the workspace exists for the target environment
+        terraform workspace select "${{ inputs.environment }}" 2>/dev/null || terraform workspace new "${{ inputs.environment }}"
+      shell: bash
+
+    - name: Terraform plan
+      if: ${{ inputs.run-plan == 'true' }}
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        terraform plan -input=false -out="${{ inputs.plan-out }}"
+        # Export plan summary JSON for consumers if needed
+        terraform show -json "${{ inputs.plan-out }}" > "${{ inputs.plan-out }}.json" || true
+      shell: bash
+
+    - name: Terraform apply (optional)
+      if: ${{ inputs.run-apply == 'true' }}
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        terraform apply -input=false -auto-approve "${{ inputs.plan-out }}"
       shell: bash
