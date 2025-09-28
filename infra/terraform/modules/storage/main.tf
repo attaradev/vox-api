@@ -16,7 +16,7 @@ locals {
         selection = {
           tagStatus   = "any"
           countType   = "imageCountMoreThan"
-          countNumber = 20
+          countNumber = 5
         }
         action = {
           type = "expire"

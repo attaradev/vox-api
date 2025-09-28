@@ -80,8 +80,8 @@ output "django_secret_key_ssm_name" {
 }
 
 output "rds_endpoint" {
-  value       = aws_db_instance.postgres.endpoint
-  description = "PostgreSQL endpoint"
+  value       = aws_db_instance.postgres.address
+  description = "PostgreSQL endpoint hostname"
 }
 
 output "rds_port" {
