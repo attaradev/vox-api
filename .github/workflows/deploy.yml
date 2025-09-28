@@ -176,6 +176,8 @@ jobs:
           missing=()
           if [ -z "${{ steps.outs.outputs.ecr_repository_url }}" ] || [ "${{ steps.outs.outputs.ecr_repository_url }}" = "null" ]; then
             missing+=(ecr_repository_url)
+            echo "Note: ecr_repository_url is empty; printing 'terraform output -json' for debugging:" >&2 || true
+            (cd ${{ env.TF_WORKDIR }} && terraform output -json) || true
           fi
           if [ -z "${{ steps.outs.outputs.ecs_task_family }}" ] || [ "${{ steps.outs.outputs.ecs_task_family }}" = "null" ]; then
             missing+=(ecs_task_family)
@@ -191,6 +193,8 @@ jobs:
   build_and_push_image:
     name: Build & Push Image
     runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.image_tag.outputs.IMAGE_TAG }}
     needs: [get_terraform_outputs]
     permissions: { id-token: write, contents: read }
     steps:
@@ -208,14 +212,37 @@ jobs:
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Determine image tag (short sha)
+        id: image_tag
+        run: |
+          set -euo pipefail
+          # Compute a short image tag so image names are shorter and friendlier
+          full_sha="${GITHUB_SHA:-${{ github.sha }}}"
+          short_sha="${full_sha:0:7}"
+          echo "IMAGE_TAG=${short_sha}" >> "$GITHUB_OUTPUT"
+
       - name: Build & push
         env:
           ECR_REPO_URL: ${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}
-          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_TAG: ${{ steps.image_tag.outputs.IMAGE_TAG }}
         run: |
           set -euo pipefail
+          # Defensive checks: ensure we have an ECR repo URL and image tag before trying to build/push
+          if [ -z "${ECR_REPO_URL:-}" ] || [ "${ECR_REPO_URL:-}" = "null" ]; then
+            echo "Error: ECR_REPO_URL is empty. Terraform did not output an ECR repository URL for this environment."
+            echo "Please run the infrastructure workflow to provision the ECR repository or set the CONTAINER_IMAGE secret to override."
+            echo "Terraform output 'ecr_repository_url' was: '${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}'" >&2 || true
+            exit 1
+          fi
+          if [ -z "${IMAGE_TAG:-}" ]; then
+            echo "Error: IMAGE_TAG is empty. Cannot build image with empty tag." >&2
+            exit 1
+          fi
+
           IMAGE="${ECR_REPO_URL}:${IMAGE_TAG}"
+          echo "Building Docker image: $IMAGE"
           docker build --pull --tag "$IMAGE" .
+          echo "Pushing Docker image: $IMAGE"
           docker push "$IMAGE"
 
   deploy_ecs:
@@ -268,7 +295,7 @@ jobs:
       - name: Register task definitions (API & Celery) using TF outputs
         id: register_td
         env:
-          NEW_IMAGE: ${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}:${{ github.sha }}
+          NEW_IMAGE: ${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}:${{ needs.build_and_push_image.outputs.image_tag }}
           ECS_TASK_FAMILY: ${{ needs.get_terraform_outputs.outputs.ecs_task_family }}
           CELERY_TASK_FAMILY: ${{ needs.get_terraform_outputs.outputs.celery_task_family }}
           BASE_ENV_JSON: ${{ needs.get_terraform_outputs.outputs.application_environment }}
