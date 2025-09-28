@@ -213,7 +213,13 @@ jobs:
           short_sha="${full_sha:0:7}"
           ecr_repo="${{ needs.get_terraform_outputs.outputs.ecr_repository_url }}"
           if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
-            echo "ECR repository URL missing from get_terraform_outputs." >&2
+            echo "ECR repository URL missing from get_terraform_outputs; attempting to read from Terraform state..." >&2
+            if [ -d "${{ env.TF_WORKDIR }}" ]; then
+              ecr_repo=$(cd "${{ env.TF_WORKDIR }}" && terraform output -raw ecr_repository_url 2>/dev/null || true)
+            fi
+          fi
+          if [ -z "${ecr_repo}" ] || [ "${ecr_repo}" = "null" ]; then
+            echo "ECR repository URL missing from get_terraform_outputs and Terraform state; aborting." >&2
             exit 1
           fi
           echo "IMAGE_TAG=${short_sha}" >> "$GITHUB_OUTPUT"
