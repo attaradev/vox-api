@@ -42,7 +42,18 @@ runs:
       run: |
         set -euo pipefail
         echo "TF_VAR_environment=${{ inputs.environment }}" >> "$GITHUB_ENV"
-        echo "TF_VAR_short_environment=${{ inputs.environment }}" >> "$GITHUB_ENV"
+        # Map common long environment names to short identifiers used in naming
+        map_short() {
+          case "${1,,}" in
+            production|prod) echo "prod" ;;
+            staging|stage|stg) echo "stg" ;;
+            development|dev) echo "dev" ;;
+            qa) echo "qa" ;;
+            *) echo "${1}" ;;
+          esac
+        }
+        SHORT_ENV=$(map_short "${{ inputs.environment }}")
+        echo "TF_VAR_short_environment=${SHORT_ENV}" >> "$GITHUB_ENV"
         echo "TF_VAR_aws_region=${{ inputs.aws-region }}" >> "$GITHUB_ENV"
         echo "TF_VAR_project=${{ env.PROJECT_NAME }}" >> "$GITHUB_ENV"
         echo "TF_VAR_additional_tags={\"DeployedBy\":\"GitHubActions\",\"Workflow\":\"${GITHUB_WORKFLOW}\",\"RunId\":\"${GITHUB_RUN_ID}\",\"CommitSHA\":\"${GITHUB_SHA}\"}" >> "$GITHUB_ENV"
