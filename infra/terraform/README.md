@@ -90,7 +90,7 @@ You can also specify `flow_logs_log_group_name` and `flow_logs_retention_in_days
 - `flow_logs_log_group_name` – Existing CloudWatch log group name for flow logs (optional).
 - `flow_logs_retention_in_days` – Retention period for VPC flow logs.
 
-1. Copy the sample variables file and tailor it for your environment:
+1; Copy the sample variables file and tailor it for your environment:
 
    ```bash
    cd infra/terraform
@@ -98,19 +98,28 @@ You can also specify `flow_logs_log_group_name` and `flow_logs_retention_in_days
    # Edit terraform.tfvars for environment-specific overrides
    ```
 
-2. Initialize Terraform and download providers:
+Notes on adopting existing CloudWatch Log Group
+
+If you already have a CloudWatch Logs log group for VPC flow logs and want Terraform to use it rather than create a new one, set one of the following in your `terraform.tfvars`:
+
+- `flow_logs_log_group_name = "/aws/vpc/vox-api-production-flow-logs"` — explicitly provide the existing log group name. The networking module will use a data source to read it.
+- `adopt_existing_flow_logs = true` — tell the module to try to adopt the generated name ("/aws/vpc/${name_prefix}-flow-logs"). Use this only if the existing group matches the generated name.
+
+When adopting, Terraform will not attempt to create the log group. This avoids "ResourceAlreadyExistsException" errors when the log group exists outside Terraform.
+
+2; Initialize Terraform and download providers:
 
    ```bash
    terraform init
    ```
 
-3. Select or create a workspace for your environment (e.g., dev, staging, prod):
+3; Select or create a workspace for your environment (e.g., dev, staging, prod):
 
    ```bash
    terraform workspace select staging || terraform workspace new staging
    ```
 
-4. Review and apply changes:
+4; Review and apply changes:
 
    ```bash
    terraform plan

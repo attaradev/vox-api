@@ -149,6 +149,7 @@ module "network" {
   private_data_subnet_cidrs = local.computed_private_data_subnets
   single_nat_gateway        = var.single_nat_gateway
   flow_logs_log_group_name  = var.flow_logs_log_group_name
+  adopt_existing_flow_logs  = var.adopt_existing_flow_logs
   tags                      = local.tags
 }
 
@@ -170,14 +171,16 @@ resource "random_password" "redis" {
 module "storage" {
   source = "./modules/storage"
 
-  name_prefix           = local.name_prefix
-  project               = var.project
-  tags                  = local.tags
-  force_destroy         = var.s3_force_destroy
-  versioning_enabled    = var.s3_versioning_enabled
-  create_alb_log_bucket = var.create_alb_log_bucket
-  alb_log_force_destroy = var.alb_log_force_destroy
-  alb_log_kms_key_arn   = var.alb_log_kms_key_arn
+  name_prefix                  = local.name_prefix
+  project                      = var.project
+  tags                         = local.tags
+  force_destroy                = var.s3_force_destroy
+  versioning_enabled           = var.s3_versioning_enabled
+  create_alb_log_bucket        = var.create_alb_log_bucket
+  alb_log_force_destroy        = var.alb_log_force_destroy
+  alb_log_kms_key_arn          = var.alb_log_kms_key_arn
+  db_skip_final_snapshot       = var.db_skip_final_snapshot
+  db_final_snapshot_identifier = var.db_final_snapshot_identifier
 
   db_security_group_id    = module.network.rds_security_group_id
   redis_security_group_id = module.network.redis_security_group_id

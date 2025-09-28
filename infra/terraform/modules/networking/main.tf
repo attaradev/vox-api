@@ -293,7 +293,9 @@ locals {
 }
 
 resource "aws_cloudwatch_log_group" "flow_logs" {
-  count = var.enable_vpc_flow_logs && var.flow_logs_log_group_name == "" ? 1 : 0
+  # Create only when flow logs enabled, no explicit log group name provided,
+  # and not explicitly adopting an existing group
+  count = var.enable_vpc_flow_logs && var.flow_logs_log_group_name == "" && !var.adopt_existing_flow_logs ? 1 : 0
 
   name              = local.flow_logs_log_group_name
   retention_in_days = var.flow_logs_retention_in_days
@@ -304,9 +306,10 @@ resource "aws_cloudwatch_log_group" "flow_logs" {
 }
 
 data "aws_cloudwatch_log_group" "flow_logs" {
-  count = var.enable_vpc_flow_logs && var.flow_logs_log_group_name != "" ? 1 : 0
+  # Read existing group when a name is provided or adoption is requested
+  count = var.enable_vpc_flow_logs && (var.flow_logs_log_group_name != "" || var.adopt_existing_flow_logs) ? 1 : 0
 
-  name = var.flow_logs_log_group_name
+  name = var.flow_logs_log_group_name != "" ? var.flow_logs_log_group_name : local.flow_logs_log_group_name
 }
 
 locals {

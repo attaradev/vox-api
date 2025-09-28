@@ -67,6 +67,12 @@ variable "flow_logs_log_group_name" {
   default     = ""
 }
 
+variable "adopt_existing_flow_logs" {
+  description = "If true, the module will adopt an existing CloudWatch Logs log group with the generated name instead of creating one. Use only when the log group already exists."
+  type        = bool
+  default     = false
+}
+
 variable "create_vpc_endpoints" {
   description = "Whether to create common VPC interface and gateway endpoints"
   type        = bool

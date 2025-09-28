@@ -86,6 +86,12 @@ variable "flow_logs_retention_in_days" {
   default     = 30
 }
 
+variable "adopt_existing_flow_logs" {
+  description = "If true, networking module will attempt to adopt an existing CloudWatch Logs log group instead of creating one"
+  type        = bool
+  default     = false
+}
+
 variable "create_vpc_endpoints" {
   description = "Create common VPC endpoints for private connectivity"
   type        = bool
@@ -127,8 +133,6 @@ variable "certificate_arn" {
   type        = string
   default     = ""
 }
-
-/* Removed: existing_alb_log_bucket_name - Terraform will manage ALB log bucket when create_alb_log_bucket is true. */
 
 variable "s3_force_destroy" {
   description = "Allow Terraform to destroy S3 buckets even when they are not empty"
@@ -396,7 +400,21 @@ variable "db_apply_immediately" {
   default     = false
 }
 
-/* Removed: db_existing_password - Terraform now always manages the DB password via random_password.db */
+variable "db_skip_final_snapshot" {
+  description = "Skip final snapshot on Postgres deletion"
+  type        = bool
+  default     = true
+}
+
+variable "db_final_snapshot_identifier" {
+  description = "Identifier to use for the final DB snapshot when skip_final_snapshot is false"
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.db_skip_final_snapshot || (trim(var.db_final_snapshot_identifier) != "")
+    error_message = "db_final_snapshot_identifier must be provided when db_skip_final_snapshot is false"
+  }
+}
 
 variable "db_additional_allowed_security_group_ids" {
   description = "Additional security groups allowed to access the database"
