@@ -192,6 +192,7 @@ module "storage" {
   source = "./modules/storage"
 
   name_prefix                  = local.name_prefix
+  db_engine_version            = var.db_engine_version
   project                      = var.project
   tags                         = local.tags
   force_destroy                = var.s3_force_destroy

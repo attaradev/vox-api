@@ -25,7 +25,7 @@ locals {
     ]
   })
 
-  repository_name = trimspace(var.ecr_repository_name) != "" ? var.ecr_repository_name : lower(replace("${var.project}-api", "_", "-"))
+  repository_name = trimspace(var.ecr_repository_name) != "" ? var.ecr_repository_name : lower(replace(var.project, "_", "-"))
 }
 
 resource "aws_s3_bucket" "static" {
@@ -225,7 +225,7 @@ resource "random_password" "stripe_webhook_secret" {
 resource "aws_db_instance" "postgres" {
   allocated_storage         = var.db_allocated_storage
   engine                    = "postgres"
-  engine_version            = var.db_engine_version
+  engine_version            = var.db_engine_version != "" ? var.db_engine_version : null
   instance_class            = var.db_instance_class
   db_name                   = var.db_name
   username                  = var.db_username
