@@ -158,6 +158,16 @@ jobs:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - uses: ./.github/actions/terraform-setup
+        with:
+          working-directory: ${{ env.TF_WORKDIR }}
+          state-bucket: ${{ env.TF_STATE_BUCKET }}
+          backend-key: state/${{ env.DEPLOY_ENV }}/terraform.tfstate
+          environment: ${{ env.DEPLOY_ENV }}
+          aws-region: ${{ env.AWS_REGION }}
+          run-plan: "false"
+          run-apply: "false"
+
       - name: Set IMAGE_TAG env from build job
         run: |
           echo "IMAGE_TAG=${{ needs.build_and_push_image.outputs.image_tag }}" >> "$GITHUB_ENV"

@@ -10,13 +10,15 @@ locals {
       valueFrom = (can(regex("^arn:aws:ssm:[^:]+:[0-9]+:parameter/.+", v)) ? v : "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${replace(v, "^/", "")}")
     }
   ]
-  # Compute effective container image: if var.container_image looks like a full image (contains '/'), use it.
-  # Otherwise, construct from account/reg + repo + tag when tag provided via var.image_tag.
-  effective_repo = length(var.ecr_repository_name) > 0 ? var.ecr_repository_name : var.name_prefix
+  container_image_input = trimspace(var.container_image)
+  container_image_parts = length(local.container_image_input) > 0 ? split(":", local.container_image_input) : []
+  container_image_base  = length(local.container_image_parts) > 1 ? join(":", slice(local.container_image_parts, 0, length(local.container_image_parts) - 1)) : local.container_image_input
+  image_tag_trimmed     = trimspace(var.image_tag)
+  image_repo_for_tag    = length(trimspace(local.container_image_base)) > 0 ? trimspace(local.container_image_base) : trimspace(var.ecr_repository_name)
   container_image_effective = (
-    contains(var.container_image, "/") ? var.container_image : (
-      length(var.image_tag) > 0 ? format("%s:%s", local.effective_repo, var.image_tag) : var.container_image
-    )
+    length(local.image_tag_trimmed) > 0 && length(local.image_repo_for_tag) > 0
+      ? format("%s:%s", local.image_repo_for_tag, local.image_tag_trimmed)
+      : local.container_image_input
   )
 }
 
