@@ -107,6 +107,26 @@ def main():
             new_c["entryPoint"] = ["/bin/sh", "-lc"]
             # command is a single string passed to the shell
             new_c["command"] = ["python manage.py migrate --noinput"]
+            # Force migration container to use the :latest tag of the same
+            # repository (so CI can push latest and migration tasks will pull it)
+            try:
+                img = new_c.get("image", "")
+                if img:
+                    # strip any existing :tag or @digest
+                    base = img.split(":")[0]
+                    # handle image names that contain port or registry colons
+                    # e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/vox-api:abcd123
+                    if ":" in img and "/" in img and img.rfind(":") > img.find("/"):
+                        # split at last ':' to remove tag
+                        base = img.rsplit(":", 1)[0]
+                    elif "@" in img:
+                        base = img.split("@", 1)[0]
+                    latest_img = base + ":latest"
+                    new_c["image"] = latest_img
+            except Exception:
+                # best-effort: if we cannot compute latest tag, proceed
+                # with the original image in the base task definition
+                pass
             # Ensure environment contains migration flags
             env_map = {
                 env["name"]: env["value"] for env in new_c.get("environment", [])
