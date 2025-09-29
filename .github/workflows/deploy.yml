@@ -185,7 +185,7 @@ jobs:
           # Run a plan with -detailed-exitcode so we can tell if there are changes (exit 2)
           # Exit codes: 0=no changes, 1=error, 2=changes present
           set +e
-          terraform plan -var "image_tag=${IMAGE_TAG}" -out=tfplan -input=false -no-color
+          terraform plan -detailed-exitcode -var "image_tag=${IMAGE_TAG}" -out=tfplan -input=false -no-color
           plan_exit=$?
           set -e
           if [ "$plan_exit" -eq 0 ]; then
