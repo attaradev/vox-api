@@ -133,8 +133,18 @@ jobs:
             echo "IMAGE_URI missing" >&2
             exit 1
           fi
-          docker build --pull --tag "${IMAGE_URI}" .
-          docker push "${IMAGE_URI}"
+          # IMAGE_URI is registry/repo:shortsha
+          short_uri="${IMAGE_URI}"
+          # Also tag as latest so existing systems referencing :latest continue to work
+          latest_uri="${REGISTRY}/${ECR_REPOSITORY_NAME}:latest"
+
+          docker build --pull --tag "${short_uri}" .
+          # push short sha tag first
+          docker push "${short_uri}"
+
+          # tag and push latest
+          docker tag "${short_uri}" "${latest_uri}"
+          docker push "${latest_uri}"
 
   apply_image_tag:
     name: Apply image_tag to Terraform (register new task def)
