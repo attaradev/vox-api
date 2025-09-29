@@ -242,3 +242,81 @@ variable "celery_environment_overrides" {
   type        = map(string)
   default     = {}
 }
+
+variable "create_service_discovery_namespace" {
+  description = "Whether to create a private Service Discovery (Cloud Map) namespace for this service"
+  type        = bool
+  default     = false
+}
+
+variable "service_discovery_namespace_name" {
+  description = "If create_service_discovery_namespace is true, the DNS name for the private namespace (e.g. example.internal)"
+  type        = string
+  default     = ""
+}
+
+variable "service_discovery_namespace_id" {
+  description = "If provided, use this existing service discovery namespace id instead of creating a new one"
+  type        = string
+  default     = ""
+}
+
+variable "service_discovery_dns_record_ttl" {
+  description = "TTL for created Cloud Map DNS records"
+  type        = number
+  default     = 60
+}
+
+variable "environment_name" {
+  description = "Short environment name (e.g., production, staging) used for naming resources like service discovery namespace"
+  type        = string
+  default     = "production"
+}
+
+variable "short_environment" {
+  description = "Short environment identifier (e.g., prod, stg, dev). Falls back to var.environment_name if empty."
+  type        = string
+  default     = ""
+}
+
+variable "target_group_deregistration_delay" {
+  description = "Seconds to wait for connection draining when a target is deregistered from the ALB target group"
+  type        = number
+  default     = 120
+}
+
+variable "target_group_slow_start" {
+  description = "Optional slow start duration for new targets in seconds. 0 disables slow start."
+  type        = number
+  default     = 0
+}
+
+variable "target_group_stickiness_enabled" {
+  description = "Enable target group stickiness (session affinity)."
+  type        = bool
+  default     = false
+}
+
+variable "target_group_stickiness_lb_cookie_duration" {
+  description = "Duration in seconds for the ALB cookie-based stickiness when enabled."
+  type        = number
+  default     = 86400
+}
+
+variable "use_host_port" {
+  description = "Whether to set hostPort equal to containerPort. For Fargate it is recommended to keep hostPort = 0 (ephemeral)."
+  type        = bool
+  default     = false
+}
+
+variable "enable_alb_request_count_scaling" {
+  description = "Enable Application Load Balancer Request Count per Target autoscaling policy."
+  type        = bool
+  default     = true
+}
+
+variable "alb_request_count_target" {
+  description = "Target requests per second per target for ALB request-count scaling."
+  type        = number
+  default     = 100
+}

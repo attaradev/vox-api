@@ -179,6 +179,7 @@ resource "aws_lb_target_group" "this" {
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
   target_type = "ip"
+  slow_start  = var.target_group_slow_start
 
   health_check {
     healthy_threshold   = 3
@@ -189,7 +190,16 @@ resource "aws_lb_target_group" "this" {
     path                = var.health_check_path
   }
 
-  deregistration_delay = 30
+  deregistration_delay = var.target_group_deregistration_delay
+
+  dynamic "stickiness" {
+    for_each = var.target_group_stickiness_enabled ? [1] : []
+    content {
+      enabled         = true
+      type            = "lb_cookie"
+      cookie_duration = var.target_group_stickiness_lb_cookie_duration
+    }
+  }
 
   tags = merge(var.tags, {
     Name = "${var.name_prefix}-tg"
@@ -264,7 +274,7 @@ resource "aws_ecs_task_definition" "this" {
       portMappings = [
         {
           containerPort = var.container_port
-          hostPort      = var.container_port
+          hostPort      = var.use_host_port ? var.container_port : 0
           protocol      = "tcp"
         }
       ]
@@ -324,6 +334,15 @@ resource "aws_ecs_service" "this" {
     container_port   = var.container_port
   }
 
+  dynamic "service_registries" {
+    for_each = (
+      var.service_discovery_namespace_id != "" || var.create_service_discovery_namespace ? [1] : []
+    )
+    content {
+      registry_arn = try(aws_service_discovery_service.this[0].arn, null)
+    }
+  }
+
   lifecycle {
     ignore_changes = [desired_count]
   }
@@ -331,6 +350,41 @@ resource "aws_ecs_service" "this" {
   tags = merge(var.tags, {
     Name = "${var.name_prefix}-service"
   })
+}
+
+
+// Service Discovery / Cloud Map namespace & service
+data "aws_vpc" "current" {
+  id = var.vpc_id
+}
+
+resource "aws_service_discovery_private_dns_namespace" "this" {
+  count = var.create_service_discovery_namespace && var.service_discovery_namespace_id == "" ? 1 : 0
+
+  name = var.service_discovery_namespace_name != "" ? var.service_discovery_namespace_name : format("%s.%s.internal", var.name_prefix, var.short_environment != "" ? var.short_environment : var.environment_name)
+  vpc  = data.aws_vpc.current.id
+  tags = var.tags
+}
+
+resource "aws_service_discovery_service" "this" {
+  count = (var.service_discovery_namespace_id != "" || var.create_service_discovery_namespace) ? 1 : 0
+
+  name = "${var.name_prefix}-sd"
+
+  dns_config {
+    namespace_id = var.service_discovery_namespace_id != "" ? var.service_discovery_namespace_id : aws_service_discovery_private_dns_namespace.this[0].id
+    dns_records {
+      type = "A"
+      ttl  = var.service_discovery_dns_record_ttl
+    }
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+
+  tags = var.tags
 }
 
 resource "aws_appautoscaling_target" "ecs" {
@@ -373,6 +427,26 @@ resource "aws_appautoscaling_policy" "memory" {
 
     predefined_metric_specification {
       predefined_metric_type = "ECSServiceAverageMemoryUtilization"
+    }
+  }
+}
+
+resource "aws_appautoscaling_policy" "alb_request" {
+  count              = var.enable_alb_request_count_scaling ? 1 : 0
+  name               = "${var.name_prefix}-alb-req-policy"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.ecs.resource_id
+  scalable_dimension = aws_appautoscaling_target.ecs.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.ecs.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    target_value       = var.alb_request_count_target
+    scale_in_cooldown  = 60
+    scale_out_cooldown = 60
+
+    predefined_metric_specification {
+      predefined_metric_type = "ALBRequestCountPerTarget"
+      resource_label         = format("%s/%s", aws_lb.this.arn_suffix, aws_lb_target_group.this.arn_suffix)
     }
   }
 }

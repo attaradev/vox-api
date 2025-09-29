@@ -58,6 +58,16 @@ output "target_group_arn" {
   description = "ARN of the ALB target group"
 }
 
+output "service_discovery_service_id" {
+  value       = try(aws_service_discovery_service.this[0].id, null)
+  description = "Cloud Map service id for ECS service discovery (null if not created)"
+}
+
+output "service_discovery_service_arn" {
+  value       = try(aws_service_discovery_service.this[0].arn, null)
+  description = "Cloud Map service arn for ECS service discovery (null if not created)"
+}
+
 output "log_group_name" {
   value       = aws_cloudwatch_log_group.this.name
   description = "CloudWatch log group for container logs"

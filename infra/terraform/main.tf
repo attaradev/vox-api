@@ -43,10 +43,6 @@ resource "aws_iam_policy" "ecs_ssm_read" {
 
 }
 
-# The ecs_ssm_read policy will be merged into the main ecs_task_role_policy_map below
-
-# Compute a canonical short environment name (prod/stg/dev/qa, etc.). Prefer a mapping
-# from the long `var.environment` value; fall back to the explicit `var.short_environment`.
 locals {
   short_environment = lookup(
     {
@@ -315,4 +311,5 @@ module "ecs" {
   celery_command                        = var.celery_command
   celery_environment_overrides          = merge({ SERVICE_ROLE = "celery", SKIP_DB_MIGRATIONS = "1" }, var.celery_environment_overrides)
   ecs_health_check_grace_period_seconds = var.ecs_health_check_grace_period_seconds
+  short_environment                     = local.short_environment
 }
