@@ -295,14 +295,77 @@ def main():
         stop_reason = task_desc.get("stopReason", "")
 
         # If exit_code is None, the task may have been stopped
-        # without container exit information
+        # without container exit information (for example a pull error).
         if exit_code is None:
+            stop_code = task_desc.get("stopCode", "")
+            # stoppedReason is sometimes present as 'stoppedReason' or 'stopReason'
+            stop_reason = task_desc.get("stoppedReason") or task_desc.get(
+                "stopReason", ""
+            )
+            container_reason = container_desc.get("reason", "")
+
             print(
-                "Container exit code not available. Task details:",
+                "Container exit code not available.",
+                "stop_code=",
+                stop_code,
+                "stop_reason=",
+                stop_reason,
+                "container_reason=",
+                container_reason,
+                file=sys.stderr,
+            )
+
+            # Detect common start failures (image pull / not found)
+            if (
+                stop_code == "TaskFailedToStart"
+                or "CannotPullContainerError" in str(stop_reason)
+                or "CannotPullContainerError" in str(container_reason)
+            ):
+                # Try to show what image the task attempted to pull
+                try:
+                    td_arn = task_desc.get("taskDefinitionArn")
+                    if td_arn:
+                        td = ecs.describe_task_definition(taskDefinition=td_arn)[
+                            "taskDefinition"
+                        ]
+                        td_cont = None
+                        for c in td.get("containerDefinitions", []):
+                            if c.get("name") == container_name:
+                                td_cont = c
+                                break
+                        if td_cont is None and td.get("containerDefinitions"):
+                            td_cont = td.get("containerDefinitions")[0]
+                        if td_cont is not None:
+                            print(
+                                "Task attempted to pull image:",
+                                td_cont.get("image"),
+                                file=sys.stderr,
+                            )
+                except Exception as ex:
+                    print(
+                        "Failed to describe task definition to show attempted image:",
+                        ex,
+                        file=sys.stderr,
+                    )
+
+                print(
+                    "Detected task start / image pull failure.",
+                    file=sys.stderr,
+                )
+                print(
+                    "Ensure the image tag referenced in the task definition",
+                    "exists in ECR and that CI applied the same tag to Terraform.",
+                    file=sys.stderr,
+                )
+                # Distinct exit code for task start / image pull failures
+                sys.exit(6)
+
+            # Generic missing exit code case
+            print(
+                "Task details:",
                 json.dumps(task_desc, default=str),
                 file=sys.stderr,
             )
-            # Treat as failure
             sys.exit(5)
 
         if exit_code != 0:
