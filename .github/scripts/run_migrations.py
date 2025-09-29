@@ -67,21 +67,7 @@ def main():
         options = log_cfg.setdefault("options", {})
         options["awslogs-stream-prefix"] = "migrate"
 
-    migrate_td_def = {
-        "family": f"{family}-migrate",
-        "taskRoleArn": base_td.get("taskRoleArn"),
-        "executionRoleArn": base_td.get("executionRoleArn"),
-        "networkMode": base_td["networkMode"],
-        "containerDefinitions": [migrate_container],
-        "requiresCompatibilities": base_td.get("requiresCompatibilities", []),
-        "cpu": base_td.get("cpu"),
-        "memory": base_td.get("memory"),
-        "runtimePlatform": base_td.get("runtimePlatform"),
-        "volumes": base_td.get("volumes", []),
-    }
-
-    register_resp = ecs.register_task_definition(**migrate_td_def)
-    migrate_td_arn = register_resp["taskDefinition"]["taskDefinitionArn"]
+    migrate_td_arn = base_td_arn
 
     try:
         run_resp = ecs.run_task(
@@ -89,6 +75,17 @@ def main():
             launchType="FARGATE",
             taskDefinition=migrate_td_arn,
             count=1,
+            overrides={
+                "containerOverrides": [
+                    {
+                        "name": container_name,
+                        "command": ["python", "manage.py", "migrate", "--noinput"],
+                        "environment": [
+                            {"name": k, "value": v} for k, v in existing_env.items()
+                        ],
+                    }
+                ]
+            },
             networkConfiguration={
                 "awsvpcConfiguration": {
                     "subnets": subnets,
@@ -269,7 +266,9 @@ def main():
             sys.exit(exit_code)
         print("Migrations completed successfully.")
     finally:
-        ecs.deregister_task_definition(taskDefinition=migrate_td_arn)
+        # No registration performed, nothing to deregister. If we had registered
+        # a task definition earlier, we would deregister it here.
+        pass
 
 
 if __name__ == "__main__":
