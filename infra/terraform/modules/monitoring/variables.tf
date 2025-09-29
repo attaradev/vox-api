@@ -42,3 +42,9 @@ variable "ecs_cpu_alarm_threshold" {
   type        = number
   default     = 80
 }
+
+variable "namespace" {
+  description = "CloudWatch metric namespace to use for ECS metrics"
+  type        = string
+  default     = "AWS/ECS"
+}

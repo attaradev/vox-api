@@ -16,7 +16,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_cpu_high" {
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 2
   metric_name         = "CPUUtilization"
-  namespace           = "AWS/ECS"
+  namespace           = var.namespace
   period              = 60
   statistic           = "Average"
   threshold           = var.ecs_cpu_alarm_threshold
@@ -34,7 +34,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_unhealthy" {
   comparison_operator = "GreaterThanOrEqualToThreshold"
   evaluation_periods  = 1
   metric_name         = "UnhealthyTaskCount"
-  namespace           = "AWS/ECS"
+  namespace           = var.namespace
   period              = 60
   statistic           = "Maximum"
   threshold           = 1
