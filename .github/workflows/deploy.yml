@@ -242,6 +242,40 @@ jobs:
         run: |
           echo "IMAGE_TAG=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
+      - name: ECS deployment diagnostics (always)
+        if: always()
+        working-directory: ${{ env.TF_WORKDIR }}
+        run: |
+          set -euo pipefail
+          echo "Collecting ECS deployment diagnostics..."
+          # read terraform outputs (best-effort)
+          outputs=$(terraform output -json 2>/dev/null || true)
+          cluster=$(echo "$outputs" | jq -r '.ecs_cluster_name.value // empty')
+          service=$(echo "$outputs" | jq -r '.ecs_service_name.value // empty')
+          task_family=$(echo "$outputs" | jq -r '.ecs_task_family.value // empty')
+          echo "Terraform outputs: cluster=$cluster service=$service task_family=$task_family"
+
+          if [ -n "$cluster" ] && [ -n "$service" ]; then
+            echo "ECS service events:"
+            aws ecs describe-services --cluster "$cluster" --services "$service" --query 'services[0].events' --output json || true
+
+            echo "Stopped tasks (last 100) for service (for debugging):"
+            stopped_tasks=$(aws ecs list-tasks --cluster "$cluster" --service-name "$service" --desired-status STOPPED --max-items 100 --output json | jq -r '.taskArns[]?') || true
+            if [ -n "$stopped_tasks" ]; then
+              echo "Found stopped tasks:"
+              echo "$stopped_tasks"
+              # Describe stopped tasks in batches
+              for t in $stopped_tasks; do
+                echo "--- Task: $t ---"
+                aws ecs describe-tasks --cluster "$cluster" --tasks "$t" --output json || true
+              done
+            else
+              echo "No stopped tasks found for service"
+            fi
+          else
+            echo "Cluster or service name missing from terraform outputs; skipping ECS diagnostics"
+          fi
+
   run_migrations:
     name: Run Database Migrations
     runs-on: ubuntu-latest
