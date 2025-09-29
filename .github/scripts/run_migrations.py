@@ -169,8 +169,8 @@ def main():
         reason = container_desc.get("reason", "")
         stop_reason = task_desc.get("stopReason", "")
 
-    # If exit_code is None, the task may have been stopped
-    # without container exit information
+        # If exit_code is None, the task may have been stopped
+        # without container exit information
         if exit_code is None:
             print(
                 "Container exit code not available. Task details:",
