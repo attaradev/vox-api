@@ -301,7 +301,6 @@ if env_bool("ALLOW_BIND_ALL_HOSTS", False):
 
 ALLOWED_HOSTS = list(dict.fromkeys(_clean_allowed_hosts))
 
-
 # Application definition
 
 DJANGO_APPS = [

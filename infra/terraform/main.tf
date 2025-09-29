@@ -98,11 +98,10 @@ locals {
       REDIS_HOST              = module.storage.redis_primary_endpoint
       REDIS_PORT              = "6379"
       USE_REDIS_FOR_CELERY    = "1"
-      ALLOW_BIND_ALL_HOSTS    = "1"
+      DJANGO_ALLOWED_HOSTS    = "*"
       RUN_DB_MIGRATIONS       = var.ecs_run_db_migrations_default ? "1" : "0"
       SERVICE_ROLE            = "api"
     },
-    length(local.allowed_hosts_csv) > 0 ? { DJANGO_ALLOWED_HOSTS = local.allowed_hosts_csv } : {},
     var.ecs_task_environment
   )
 

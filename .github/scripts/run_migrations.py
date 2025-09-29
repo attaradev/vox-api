@@ -5,6 +5,7 @@ import os
 import sys
 
 import boto3
+import time
 
 
 def main():
@@ -112,7 +113,7 @@ def main():
         task_arn = tasks[0]["taskArn"]
         print(f"Started migration task: {task_arn}")
 
-        # Bounded waiter configuration to avoid hanging indefinitely
+        # Bounded poll loop to wait for task stop with diagnostics on timeout
         try:
             max_wait_seconds = int(os.environ.get("MIGRATE_MAX_WAIT_SECONDS", "600"))
         except Exception:
@@ -122,34 +123,89 @@ def main():
         except Exception:
             wait_delay = 15
 
-        max_attempts = max(1, int((max_wait_seconds + wait_delay - 1) / wait_delay))
+        start_time = time.time()
+        deadline = start_time + max_wait_seconds
         print(
-            "Waiting for task to stop (max "
-            + f"{max_wait_seconds}s, delay {wait_delay}s,"
-            + f" attempts {max_attempts})"
+            f"Waiting up to {max_wait_seconds}s for task to stop (poll delay {wait_delay}s)"
         )
 
-        waiter = ecs.get_waiter("tasks_stopped")
-        try:
-            waiter.wait(
-                cluster=cluster,
-                tasks=[task_arn],
-                WaiterConfig={"Delay": wait_delay, "MaxAttempts": max_attempts},
+        logs = boto3.client("logs", region_name=region)
+
+        stopped = False
+        while time.time() < deadline:
+            try:
+                desc = ecs.describe_tasks(cluster=cluster, tasks=[task_arn])
+            except Exception as e:
+                print("Failed to describe task while polling:", e, file=sys.stderr)
+                time.sleep(wait_delay)
+                continue
+
+            tasks_desc = desc.get("tasks", [])
+            if not tasks_desc:
+                print("No task description available yet; continuing to poll...")
+                time.sleep(wait_delay)
+                continue
+
+            task_d = tasks_desc[0]
+            last_status = task_d.get("lastStatus")
+            print(
+                f"Task {task_arn} lastStatus={last_status}, desiredStatus={task_d.get('desiredStatus')}")
+
+            if last_status and last_status.upper() == "STOPPED":
+                stopped = True
+                break
+
+            time.sleep(wait_delay)
+
+        if not stopped:
+            # Timed out waiting for task to stop; collect diagnostics
+            print(
+                f"Timed out waiting for task to stop after {max_wait_seconds}s",
+                file=sys.stderr,
             )
-        except Exception as e:
-            # Waiter timed out or failed — fetch task details for diagnostics
-            print("Waiter error:", e, file=sys.stderr)
             try:
                 desc = ecs.describe_tasks(cluster=cluster, tasks=[task_arn])
                 print(
-                    "Task description after waiter error:",
-                    json.dumps(desc, default=str),
-                    file=sys.stderr,
+                    "Task description at timeout:", json.dumps(desc, default=str), file=sys.stderr
                 )
             except Exception as ex:
-                print(
-                    f"Failed to describe task after waiter error: {ex}", file=sys.stderr
-                )
+                print(f"Failed to describe task at timeout: {ex}", file=sys.stderr)
+
+            # Attempt to fetch recent CloudWatch logs for the migration container if available
+            try:
+                # Try to infer log group/stream prefix from the migrate_container log config
+                log_cfg = migrate_container.get("logConfiguration", {})
+                if log_cfg.get("logDriver") == "awslogs":
+                    options = log_cfg.get("options", {})
+                    log_group = options.get("awslogs-group")
+                    stream_prefix = options.get("awslogs-stream-prefix")
+                    if log_group:
+                        now_ms = int(time.time() * 1000)
+                        start_ms = int(start_time * 1000) - 60_000
+                        print(
+                            f"Fetching CloudWatch logs from {log_group} since {start_ms}", file=sys.stderr)
+                        events_resp = logs.filter_log_events(
+                            logGroupName=log_group,
+                            startTime=start_ms,
+                            endTime=now_ms,
+                            limit=200,
+                        )
+                        events = events_resp.get("events", [])
+                        if not events:
+                            print(
+                                "No CloudWatch log events found for migration task", file=sys.stderr)
+                        else:
+                            print("Recent CloudWatch log events:", file=sys.stderr)
+                            for ev in events:
+                                ts = ev.get("timestamp")
+                                msg = ev.get("message")
+                                print(f"{ts}: {msg}", file=sys.stderr)
+                else:
+                    print(
+                        "No awslogs configuration found for migration container; skipping CloudWatch logs fetch", file=sys.stderr)
+            except Exception as ex:
+                print(f"Error while fetching CloudWatch logs: {ex}", file=sys.stderr)
+
             sys.exit(2)
 
         desc = ecs.describe_tasks(cluster=cluster, tasks=[task_arn])

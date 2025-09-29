@@ -303,13 +303,6 @@ variable "target_group_stickiness_lb_cookie_duration" {
   default     = 86400
 }
 
-variable "use_host_port" {
-  description = "Whether to set hostPort equal to containerPort. For Fargate it is recommended to keep hostPort = 0 (ephemeral)."
-  type        = bool
-  default     = false
-}
-
-
 variable "enable_alb_request_count_scaling" {
   description = "Enable Application Load Balancer Request Count per Target autoscaling policy."
   type        = bool

@@ -27,7 +27,7 @@ locals {
   )
   container_health_command = length(var.container_health_command) > 0 ? var.container_health_command : [
     "CMD-SHELL",
-    format("curl -f http://localhost:%d%s || exit 1", var.container_port, var.health_check_path)
+    format("python -c \"import sys,urllib.request; urllib.request.urlopen('http://127.0.0.1:%d%s'); sys.exit(0)\" || exit 1", var.container_port, var.health_check_path)
   ]
   target_group_prefix_raw   = trimspace(substr(replace(var.name_prefix, "-", ""), 0, 5))
   target_group_prefix       = length(local.target_group_prefix_raw) > 0 ? local.target_group_prefix_raw : "tg"
@@ -286,7 +286,7 @@ resource "aws_ecs_task_definition" "this" {
           awslogs-stream-prefix = "ecs"
         }
       }
-      environment = local.celery_environment
+      environment = local.environment
       secrets     = local.secrets
       healthCheck = {
         command     = local.container_health_command
@@ -490,7 +490,7 @@ resource "aws_ecs_task_definition" "celery" {
           awslogs-stream-prefix = "celery"
         }
       }
-      environment = local.environment
+      environment = local.celery_environment
       secrets     = local.secrets
       healthCheck = {
         command     = ["CMD-SHELL", "celery -A vox_api inspect ping --timeout=10 || exit 1"]
