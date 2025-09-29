@@ -3,9 +3,9 @@ import copy
 import json
 import os
 import sys
+import time
 
 import boto3
-import time
 
 
 def main():
@@ -126,7 +126,10 @@ def main():
         start_time = time.time()
         deadline = start_time + max_wait_seconds
         print(
-            f"Waiting up to {max_wait_seconds}s for task to stop (poll delay {wait_delay}s)"
+            "Waiting up to",
+            str(max_wait_seconds) + "s",
+            "for task to stop (poll delay",
+            str(wait_delay) + "s)",
         )
 
         logs = boto3.client("logs", region_name=region)
@@ -149,7 +152,13 @@ def main():
             task_d = tasks_desc[0]
             last_status = task_d.get("lastStatus")
             print(
-                f"Task {task_arn} lastStatus={last_status}, desiredStatus={task_d.get('desiredStatus')}")
+                "Task",
+                task_arn,
+                "lastStatus=",
+                last_status,
+                "desiredStatus=",
+                task_d.get("desiredStatus"),
+            )
 
             if last_status and last_status.upper() == "STOPPED":
                 stopped = True
@@ -165,25 +174,30 @@ def main():
             )
             try:
                 desc = ecs.describe_tasks(cluster=cluster, tasks=[task_arn])
-                print(
-                    "Task description at timeout:", json.dumps(desc, default=str), file=sys.stderr
-                )
+                print("Task description at timeout:", file=sys.stderr)
+                print(json.dumps(desc, default=str), file=sys.stderr)
             except Exception as ex:
                 print(f"Failed to describe task at timeout: {ex}", file=sys.stderr)
 
-            # Attempt to fetch recent CloudWatch logs for the migration container if available
+            # Attempt to fetch recent CloudWatch logs for the migration
+            # container if available
             try:
-                # Try to infer log group/stream prefix from the migrate_container log config
+                # Try to infer log group/stream prefix from the
+                # migrate_container log config
                 log_cfg = migrate_container.get("logConfiguration", {})
                 if log_cfg.get("logDriver") == "awslogs":
                     options = log_cfg.get("options", {})
                     log_group = options.get("awslogs-group")
-                    stream_prefix = options.get("awslogs-stream-prefix")
                     if log_group:
                         now_ms = int(time.time() * 1000)
                         start_ms = int(start_time * 1000) - 60_000
                         print(
-                            f"Fetching CloudWatch logs from {log_group} since {start_ms}", file=sys.stderr)
+                            "Fetching CloudWatch logs from",
+                            log_group,
+                            "since",
+                            start_ms,
+                            file=sys.stderr,
+                        )
                         events_resp = logs.filter_log_events(
                             logGroupName=log_group,
                             startTime=start_ms,
@@ -193,7 +207,9 @@ def main():
                         events = events_resp.get("events", [])
                         if not events:
                             print(
-                                "No CloudWatch log events found for migration task", file=sys.stderr)
+                                "No CloudWatch log events found for migration task",
+                                file=sys.stderr,
+                            )
                         else:
                             print("Recent CloudWatch log events:", file=sys.stderr)
                             for ev in events:
@@ -202,7 +218,10 @@ def main():
                                 print(f"{ts}: {msg}", file=sys.stderr)
                 else:
                     print(
-                        "No awslogs configuration found for migration container; skipping CloudWatch logs fetch", file=sys.stderr)
+                        "No awslogs configuration found for migration container;",
+                        "skipping CloudWatch logs fetch",
+                        file=sys.stderr,
+                    )
             except Exception as ex:
                 print(f"Error while fetching CloudWatch logs: {ex}", file=sys.stderr)
 
