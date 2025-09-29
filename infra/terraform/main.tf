@@ -280,7 +280,11 @@ module "ecs" {
   cpu         = var.ecs_cpu
   memory      = var.ecs_memory
   # execution_role_arn left blank to use module's created execution role or an explicit override
-  container_image     = trimspace(var.container_image) != "" ? var.container_image : "${module.storage.ecr_repository_url}:latest"
+  container_image = (
+    trimspace(var.container_image) != "" ? var.container_image : (
+      trimspace(var.image_tag) != "" ? "${module.storage.ecr_repository_url}:${trimspace(var.image_tag)}" : "${module.storage.ecr_repository_url}:latest"
+    )
+  )
   environment         = local.ecs_environment
   environment_secrets = local.ecs_environment_secrets
   # Image tag and ECR repo allow CI to drive new task definition revisions by calling
