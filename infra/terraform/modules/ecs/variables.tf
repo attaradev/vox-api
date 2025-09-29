@@ -107,7 +107,7 @@ variable "container_health_command" {
 variable "container_health_interval" {
   description = "Seconds between container health checks"
   type        = number
-  default     = 30
+  default     = 10
 }
 
 variable "container_health_timeout" {
@@ -125,7 +125,7 @@ variable "container_health_retries" {
 variable "container_health_start_period" {
   description = "Grace period in seconds before starting container health checks"
   type        = number
-  default     = 180
+  default     = 300
 }
 
 variable "ecs_health_check_grace_period_seconds" {
@@ -282,13 +282,13 @@ variable "short_environment" {
 variable "target_group_deregistration_delay" {
   description = "Seconds to wait for connection draining when a target is deregistered from the ALB target group"
   type        = number
-  default     = 120
+  default     = 300
 }
 
 variable "target_group_slow_start" {
   description = "Optional slow start duration for new targets in seconds. 0 disables slow start."
   type        = number
-  default     = 0
+  default     = 30
 }
 
 variable "target_group_stickiness_enabled" {

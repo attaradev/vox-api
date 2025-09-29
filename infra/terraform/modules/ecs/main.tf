@@ -183,14 +183,15 @@ resource "aws_lb_target_group" "this" {
 
   health_check {
     healthy_threshold   = 3
-    unhealthy_threshold = 3
+    unhealthy_threshold = 5
     timeout             = 10
-    interval            = 30
+    interval            = 15
     matcher             = "200-399"
     path                = var.health_check_path
   }
 
   deregistration_delay = var.target_group_deregistration_delay
+
 
   dynamic "stickiness" {
     for_each = var.target_group_stickiness_enabled ? [1] : []
@@ -350,6 +351,17 @@ resource "aws_ecs_service" "this" {
   tags = merge(var.tags, {
     Name = "${var.name_prefix}-service"
   })
+}
+
+// Allow ALB security group to reach service tasks on container port
+resource "aws_security_group_rule" "allow_alb_to_service" {
+  description              = "Allow ALB to reach service containers"
+  type                     = "ingress"
+  from_port                = var.container_port
+  to_port                  = var.container_port
+  protocol                 = "tcp"
+  security_group_id        = var.service_security_group_id
+  source_security_group_id = var.alb_security_group_id
 }
 
 
