@@ -135,8 +135,10 @@ jobs:
           fi
           # IMAGE_URI is registry/repo:shortsha
           short_uri="${IMAGE_URI}"
-          # Also tag as latest so existing systems referencing :latest continue to work
-          latest_uri="${REGISTRY}/${ECR_REPOSITORY_NAME}:latest"
+          # Derive registry/repo from IMAGE_URI so we don't rely on REGISTRY being set
+          # e.g. IMAGE_URI=123456789012.dkr.ecr.us-east-1.amazonaws.com/vox-api:abcd123
+          image_repo_and_registry=$(echo "${IMAGE_URI}" | sed -E 's/:.*$//')
+          latest_uri="${image_repo_and_registry}:latest"
 
           docker build --pull --tag "${short_uri}" .
           # push short sha tag first
