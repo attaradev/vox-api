@@ -249,7 +249,8 @@ variable "ecs_cpu" {
 variable "ecs_memory" {
   description = "Memory (MiB) for each ECS task"
   type        = number
-  default     = 1024
+  # Increased from 1024 to 2048 to prevent Gunicorn worker OOMs during startup.
+  default = 2048
 }
 
 variable "ecs_task_environment" {
