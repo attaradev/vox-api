@@ -29,7 +29,7 @@ locals {
     "CMD-SHELL",
     format("curl -f http://localhost:%d%s || exit 1", var.container_port, var.health_check_path)
   ]
-  target_group_prefix_raw  = trim(substr(replace(var.name_prefix, "-", ""), 0, 5))
+  target_group_prefix_raw   = trimspace(substr(replace(var.name_prefix, "-", ""), 0, 5))
   target_group_prefix       = length(local.target_group_prefix_raw) > 0 ? local.target_group_prefix_raw : "tg"
   https_enabled             = var.enable_https_listener && length(trimspace(var.certificate_arn)) > 0
   effective_certificate_arn = local.https_enabled ? trimspace(var.certificate_arn) : ""
