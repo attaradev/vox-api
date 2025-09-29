@@ -173,7 +173,7 @@ jobs:
           echo "IMAGE_TAG=${{ needs.build_and_push_image.outputs.image_tag }}" >> "$GITHUB_ENV"
 
       - name: Select workspace and apply image_tag
-        working-directory: infra/terraform
+        working-directory: ${{ env.TF_WORKDIR }}
         run: |
           set -euo pipefail
           terraform workspace select "${{ env.DEPLOY_ENV }}" 2>/dev/null || terraform workspace new "${{ env.DEPLOY_ENV }}"
@@ -182,7 +182,22 @@ jobs:
             exit 1
           fi
           terraform init -input=false
-          terraform apply -var "image_tag=${IMAGE_TAG}" -auto-approve
+          # Run a plan with -detailed-exitcode so we can tell if there are changes (exit 2)
+          # Exit codes: 0=no changes, 1=error, 2=changes present
+          set +e
+          terraform plan -var "image_tag=${IMAGE_TAG}" -out=tfplan -input=false -no-color
+          plan_exit=$?
+          set -e
+          if [ "$plan_exit" -eq 0 ]; then
+            echo "No infrastructure changes detected for image_tag ${IMAGE_TAG}."
+          elif [ "$plan_exit" -eq 2 ]; then
+            echo "Changes detected for image_tag ${IMAGE_TAG}; applying..."
+            terraform apply -input=false -auto-approve tfplan
+          else
+            echo "Terraform plan failed with exit code ${plan_exit}" >&2
+            terraform show -no-color tfplan || true
+            exit $plan_exit
+          fi
 
       - name: set outputs
         id: set_outputs

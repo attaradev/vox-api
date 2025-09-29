@@ -74,32 +74,71 @@ def main():
         options = log_cfg.setdefault("options", {})
         options["awslogs-stream-prefix"] = "migrate"
 
-    migrate_td_arn = base_td_arn
+    migrate_td_arn = None
+    registered_temp_td = False
+
+    # Build register_task_definition args from base_td
+    td_kwargs = {"family": base_td.get("family")}
+    for key in (
+        "taskRoleArn",
+        "executionRoleArn",
+        "networkMode",
+        "volumes",
+        "placementConstraints",
+        "requiresCompatibilities",
+        "cpu",
+        "memory",
+        "pidMode",
+        "ipcMode",
+        "inferenceAccelerators",
+        "proxyConfiguration",
+        "ephemeralStorage",
+    ):
+        if base_td.get(key) is not None:
+            td_kwargs[key] = base_td.get(key)
+
+    # Clone and alter container definitions
+    new_containers = []
+    for c in base_td["containerDefinitions"]:
+        new_c = copy.deepcopy(c)
+        if new_c["name"] == container_name:
+            # Set entryPoint to a shell so the migrate command executes and
+            # the container exits when done regardless of original entrypoint.
+            new_c["entryPoint"] = ["/bin/sh", "-lc"]
+            # command is a single string passed to the shell
+            new_c["command"] = ["python manage.py migrate --noinput"]
+            # Ensure environment contains migration flags
+            env_map = {
+                env["name"]: env["value"] for env in new_c.get("environment", [])
+            }
+            env_map.update(
+                {
+                    "RUN_DB_MIGRATIONS": "1",
+                    "SKIP_DB_MIGRATIONS": "0",
+                    "SERVICE_ROLE": "migrate",
+                }
+            )
+            new_c["environment"] = [{"name": k, "value": v} for k, v in env_map.items()]
+            # update awslogs prefix for clarity
+            log_cfg = new_c.get("logConfiguration", {})
+            if log_cfg.get("logDriver") == "awslogs":
+                opts = log_cfg.setdefault("options", {})
+                opts["awslogs-stream-prefix"] = "migrate"
+                new_c["logConfiguration"] = log_cfg
+        new_containers.append(new_c)
+
+    td_kwargs["containerDefinitions"] = new_containers
 
     try:
+        reg = ecs.register_task_definition(**td_kwargs)
+        migrate_td_arn = reg["taskDefinition"]["taskDefinitionArn"]
+        registered_temp_td = True
+
         run_resp = ecs.run_task(
             cluster=cluster,
             launchType="FARGATE",
             taskDefinition=migrate_td_arn,
             count=1,
-            overrides={
-                "containerOverrides": [
-                    {
-                        "name": container_name,
-                        # Use a shell invocation so the migrate command runs the
-                        # same way it would when the container's entrypoint runs
-                        # it (ensures PATH, shell builtins, and exit semantics).
-                        "command": [
-                            "/bin/sh",
-                            "-lc",
-                            "python manage.py migrate --noinput",
-                        ],
-                        "environment": [
-                            {"name": k, "value": v} for k, v in existing_env.items()
-                        ],
-                    }
-                ]
-            },
             networkConfiguration={
                 "awsvpcConfiguration": {
                     "subnets": subnets,
@@ -280,9 +319,15 @@ def main():
             sys.exit(exit_code)
         print("Migrations completed successfully.")
     finally:
-        # No registration performed, nothing to deregister. If we had registered
-        # a task definition earlier, we would deregister it here.
-        pass
+        if registered_temp_td and migrate_td_arn:
+            try:
+                ecs.deregister_task_definition(taskDefinition=migrate_td_arn)
+                print("Deregistered temporary task definition", migrate_td_arn)
+            except Exception as ex:
+                print(
+                    f"Warning: failed to deregister temporary task definition: {ex}",
+                    file=sys.stderr,
+                )
 
 
 if __name__ == "__main__":
