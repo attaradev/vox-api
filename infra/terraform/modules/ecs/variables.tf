@@ -309,6 +309,7 @@ variable "use_host_port" {
   default     = false
 }
 
+
 variable "enable_alb_request_count_scaling" {
   description = "Enable Application Load Balancer Request Count per Target autoscaling policy."
   type        = bool
