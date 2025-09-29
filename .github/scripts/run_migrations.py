@@ -45,7 +45,14 @@ def main():
         sys.exit(1)
 
     migrate_container = copy.deepcopy(api_container)
-    migrate_container["command"] = ["python", "manage.py", "migrate", "--noinput"]
+    # Run migrations inside a shell so shell features and PATH work as in the
+    # normal container entrypoint. This helps ensure the process runs and
+    # exits cleanly in CI (avoids hang when command isn't run via a shell).
+    migrate_container["command"] = [
+        "/bin/sh",
+        "-lc",
+        "python manage.py migrate --noinput",
+    ]
     # Ensure migrations run in entrypoint
     existing_env = {
         env["name"]: env["value"] for env in migrate_container.get("environment", [])
@@ -79,7 +86,14 @@ def main():
                 "containerOverrides": [
                     {
                         "name": container_name,
-                        "command": ["python", "manage.py", "migrate", "--noinput"],
+                        # Use a shell invocation so the migrate command runs the
+                        # same way it would when the container's entrypoint runs
+                        # it (ensures PATH, shell builtins, and exit semantics).
+                        "command": [
+                            "/bin/sh",
+                            "-lc",
+                            "python manage.py migrate --noinput",
+                        ],
                         "environment": [
                             {"name": k, "value": v} for k, v in existing_env.items()
                         ],
