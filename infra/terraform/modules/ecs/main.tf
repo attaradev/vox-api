@@ -355,6 +355,7 @@ resource "aws_ecs_service" "this" {
 
 // Allow ALB security group to reach service tasks on container port
 resource "aws_security_group_rule" "allow_alb_to_service" {
+  count                    = var.create_alb_service_sg_rule ? 1 : 0
   description              = "Allow ALB to reach service containers"
   type                     = "ingress"
   from_port                = var.container_port

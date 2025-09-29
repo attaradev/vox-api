@@ -314,3 +314,9 @@ variable "alb_request_count_target" {
   type        = number
   default     = 100
 }
+
+variable "create_alb_service_sg_rule" {
+  description = "If true, create a security group ingress rule allowing the ALB SG to reach the service SG on the container port. Set to false if your network module already manages this rule."
+  type        = bool
+  default     = false
+}
