@@ -97,33 +97,100 @@ def main():
             },
         )
 
+        failures = run_resp.get("failures", [])
+        if failures:
+            print(
+                "Failed to start migration task, failures:", failures, file=sys.stderr
+            )
+            sys.exit(1)
+
         tasks = run_resp.get("tasks", [])
         if not tasks:
-            print("Failed to start migration task", file=sys.stderr)
+            print("Failed to start migration task (no tasks returned)", file=sys.stderr)
             sys.exit(1)
 
         task_arn = tasks[0]["taskArn"]
         print(f"Started migration task: {task_arn}")
 
+        # Bounded waiter configuration to avoid hanging indefinitely
+        try:
+            max_wait_seconds = int(os.environ.get("MIGRATE_MAX_WAIT_SECONDS", "600"))
+        except Exception:
+            max_wait_seconds = 600
+        try:
+            wait_delay = int(os.environ.get("MIGRATE_WAIT_DELAY_SECONDS", "15"))
+        except Exception:
+            wait_delay = 15
+
+        max_attempts = max(1, int((max_wait_seconds + wait_delay - 1) / wait_delay))
+        print(
+            "Waiting for task to stop (max "
+            + f"{max_wait_seconds}s, delay {wait_delay}s,"
+            + f" attempts {max_attempts})"
+        )
+
         waiter = ecs.get_waiter("tasks_stopped")
-        waiter.wait(cluster=cluster, tasks=[task_arn])
+        try:
+            waiter.wait(
+                cluster=cluster,
+                tasks=[task_arn],
+                WaiterConfig={"Delay": wait_delay, "MaxAttempts": max_attempts},
+            )
+        except Exception as e:
+            # Waiter timed out or failed — fetch task details for diagnostics
+            print("Waiter error:", e, file=sys.stderr)
+            try:
+                desc = ecs.describe_tasks(cluster=cluster, tasks=[task_arn])
+                print(
+                    "Task description after waiter error:",
+                    json.dumps(desc, default=str),
+                    file=sys.stderr,
+                )
+            except Exception as ex:
+                print(
+                    f"Failed to describe task after waiter error: {ex}", file=sys.stderr
+                )
+            sys.exit(2)
 
         desc = ecs.describe_tasks(cluster=cluster, tasks=[task_arn])
+        if not desc.get("tasks"):
+            print("No task description returned after completion", file=sys.stderr)
+            sys.exit(3)
+
         task_desc = desc["tasks"][0]
-        container_desc = task_desc["containers"][0]
-        exit_code = container_desc.get("exitCode", 1)
+        containers = task_desc.get("containers", [])
+        if not containers:
+            print("No containers present in task description", file=sys.stderr)
+            print(json.dumps(task_desc, default=str), file=sys.stderr)
+            sys.exit(4)
+
+        container_desc = containers[0]
+        exit_code = container_desc.get("exitCode")
         reason = container_desc.get("reason", "")
         stop_reason = task_desc.get("stopReason", "")
 
-        if exit_code != 0:
+    # If exit_code is None, the task may have been stopped
+    # without container exit information
+        if exit_code is None:
             print(
-                (
-                    "Migrations failed (exit="
-                    + f"{exit_code}, container_reason={reason},"
-                    + f" task_reason={stop_reason})"
-                ),
+                "Container exit code not available. Task details:",
+                json.dumps(task_desc, default=str),
                 file=sys.stderr,
             )
+            # Treat as failure
+            sys.exit(5)
+
+        if exit_code != 0:
+            msg = (
+                "Migrations failed (exit="
+                + str(exit_code)
+                + ", container_reason="
+                + str(reason)
+                + ", task_reason="
+                + str(stop_reason)
+                + ")"
+            )
+            print(msg, file=sys.stderr)
             sys.exit(exit_code)
         print("Migrations completed successfully.")
     finally:
