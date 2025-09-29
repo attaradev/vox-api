@@ -182,6 +182,32 @@ jobs:
             exit 1
           fi
           terraform init -input=false
+          # Debug: echo image tag and derive repo for verification
+          echo "DEBUG: IMAGE_TAG=${IMAGE_TAG}"
+          repo=$(terraform output -raw ecr_repository_name 2>/dev/null || true)
+          echo "DEBUG: ECR repo=${repo}"
+          if [ -z "${repo}" ]; then
+            echo "Failed to read ecr_repository_name from terraform outputs" >&2
+            exit 1
+          fi
+          # Construct an IMAGE_URI for logging (uses current AWS account)
+          account_id=$(aws sts get-caller-identity --query Account --output text)
+          region=${{ env.AWS_REGION }}
+          image_uri="${account_id}.dkr.ecr.${region}.amazonaws.com/${repo}:${IMAGE_TAG}"
+          echo "DEBUG: Constructed IMAGE_URI=${image_uri}"
+
+          # Verify the pushed image tag exists in ECR before applying Terraform
+          set +e
+          aws ecr describe-images --repository-name "${repo}" --image-ids imageTag="${IMAGE_TAG}" >/dev/null 2>&1
+          ecr_ok=$?
+          set -e
+          if [ "$ecr_ok" -ne 0 ]; then
+            echo "ECR does not contain image tag ${IMAGE_TAG} in repository ${repo}." >&2
+            echo "Listing recent images in ${repo}:" >&2
+            aws ecr list-images --repository-name "${repo}" --max-items 50 || true
+            exit 1
+          fi
+          echo "ECR verification passed: ${repo}:${IMAGE_TAG} exists"
           # Run a plan with -detailed-exitcode so we can tell if there are changes (exit 2)
           # Exit codes: 0=no changes, 1=error, 2=changes present
           set +e
