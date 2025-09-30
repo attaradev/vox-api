@@ -144,7 +144,13 @@ if [[ -n "${POSTGRES_HOST:-}" ]]; then
   port="${port:-5432}"
   export POSTGRES_HOST="$host"
   export POSTGRES_PORT="$port"
-  wait_for_service "Postgres" "$host" "$port" "${POSTGRES_WAIT_TIMEOUT:-300}" "${POSTGRES_WAIT_INTERVAL:-1}"
+  # Use longer timeout for migrations, shorter for regular app startup
+  if [[ "${SERVICE_ROLE:-}" == "migrate" ]]; then
+    db_timeout="${POSTGRES_WAIT_TIMEOUT:-300}"
+  else
+    db_timeout="${POSTGRES_WAIT_TIMEOUT:-60}"
+  fi
+  wait_for_service "Postgres" "$host" "$port" "$db_timeout" "${POSTGRES_WAIT_INTERVAL:-1}"
 else
   log INFO "Skipping Postgres wait; no host configured."
 fi
@@ -168,4 +174,5 @@ fi
 # python manage.py loaddata initial_data.json || true
 
 log INFO "Starting application process: $*"
+log INFO "Application environment: DJANGO_ENV=${DJANGO_ENV:-unknown}, SERVICE_ROLE=${SERVICE_ROLE:-unknown}"
 exec "$@"

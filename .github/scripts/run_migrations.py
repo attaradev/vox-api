@@ -48,10 +48,11 @@ def main():
     # Run migrations inside a shell so shell features and PATH work as in the
     # normal container entrypoint. This helps ensure the process runs and
     # exits cleanly in CI (avoids hang when command isn't run via a shell).
+    # Include database waiting logic for migration tasks
     migrate_container["command"] = [
         "/bin/sh",
         "-lc",
-        "python manage.py migrate --noinput",
+        "/usr/local/bin/entrypoint python manage.py migrate --noinput",
     ]
     # Ensure migrations run in entrypoint
     existing_env = {
@@ -123,9 +124,13 @@ def main():
                         base = img.split("@", 1)[0]
                     latest_img = base + ":latest"
                     new_c["image"] = latest_img
-            except Exception:
+            except (AttributeError, ValueError, IndexError) as e:
                 # best-effort: if we cannot compute latest tag, proceed
                 # with the original image in the base task definition
+                print(
+                    f"Warning: Could not compute latest image tag for {img}: {e}",
+                    file=sys.stderr,
+                )
                 pass
             # Ensure environment contains migration flags
             env_map = {
@@ -145,6 +150,9 @@ def main():
                 opts = log_cfg.setdefault("options", {})
                 opts["awslogs-stream-prefix"] = "migrate"
                 new_c["logConfiguration"] = log_cfg
+            # Remove health check for migration tasks (they should run once and exit)
+            if "healthCheck" in new_c:
+                del new_c["healthCheck"]
         new_containers.append(new_c)
 
     td_kwargs["containerDefinitions"] = new_containers

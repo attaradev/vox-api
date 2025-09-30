@@ -185,7 +185,7 @@ resource "aws_lb_target_group" "this" {
     healthy_threshold   = 3
     unhealthy_threshold = 5
     timeout             = 10
-    interval            = 15
+    interval            = 30
     matcher             = "200-399"
     path                = var.health_check_path
   }
@@ -393,10 +393,6 @@ resource "aws_service_discovery_service" "this" {
     routing_policy = "MULTIVALUE"
   }
 
-  health_check_custom_config {
-    failure_threshold = 1
-  }
-
   tags = var.tags
 }
 
@@ -551,6 +547,67 @@ resource "aws_ecs_service" "celery" {
   tags = merge(var.tags, {
     Name = "${var.name_prefix}-celery"
   })
+}
+
+# CloudWatch Alarms for Health Monitoring
+resource "aws_cloudwatch_metric_alarm" "unhealthy_host_count" {
+  alarm_name          = "${var.name_prefix}-unhealthy-hosts"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "UnHealthyHostCount"
+  namespace           = "AWS/ApplicationELB"
+  period              = "60"
+  statistic           = "Maximum"
+  threshold           = "0"
+  alarm_description   = "This metric monitors unhealthy hosts in the target group"
+  alarm_actions       = []
+
+  dimensions = {
+    TargetGroup  = aws_lb_target_group.this.arn_suffix
+    LoadBalancer = aws_lb.this.arn_suffix
+  }
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "ecs_cpu_utilization_high" {
+  alarm_name          = "${var.name_prefix}-ecs-cpu-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "3"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "80"
+  alarm_description   = "This metric monitors ECS service CPU utilization"
+  alarm_actions       = []
+
+  dimensions = {
+    ServiceName = aws_ecs_service.this.name
+    ClusterName = aws_ecs_cluster.this.name
+  }
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "ecs_memory_utilization_high" {
+  alarm_name          = "${var.name_prefix}-ecs-memory-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "3"
+  metric_name         = "MemoryUtilization"
+  namespace           = "AWS/ECS"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "85"
+  alarm_description   = "This metric monitors ECS service memory utilization"
+  alarm_actions       = []
+
+  dimensions = {
+    ServiceName = aws_ecs_service.this.name
+    ClusterName = aws_ecs_cluster.this.name
+  }
+
+  tags = var.tags
 }
 
 data "aws_region" "current" {}

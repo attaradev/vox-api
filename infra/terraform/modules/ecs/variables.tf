@@ -107,7 +107,7 @@ variable "container_health_command" {
 variable "container_health_interval" {
   description = "Seconds between container health checks"
   type        = number
-  default     = 10
+  default     = 30
 }
 
 variable "container_health_timeout" {
@@ -125,7 +125,7 @@ variable "container_health_retries" {
 variable "container_health_start_period" {
   description = "Grace period in seconds before starting container health checks"
   type        = number
-  default     = 300
+  default     = 120
 }
 
 variable "ecs_health_check_grace_period_seconds" {
@@ -215,7 +215,7 @@ variable "scale_max_capacity" {
 variable "scale_cpu_target" {
   description = "Target CPU utilization percentage for autoscaling"
   type        = number
-  default     = 60
+  default     = 50
 }
 
 variable "scale_memory_target" {
@@ -312,7 +312,7 @@ variable "enable_alb_request_count_scaling" {
 variable "alb_request_count_target" {
   description = "Target requests per second per target for ALB request-count scaling."
   type        = number
-  default     = 100
+  default     = 50
 }
 
 variable "create_alb_service_sg_rule" {

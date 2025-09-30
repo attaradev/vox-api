@@ -316,6 +316,10 @@ THIRD_PARTY_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "drf_spectacular",
+    "health_check",
+    "health_check.db",
+    "health_check.cache",
+    "health_check.storage",
 ]
 
 LOCAL_APPS = [
