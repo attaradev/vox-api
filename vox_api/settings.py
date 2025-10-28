@@ -2,6 +2,8 @@ import logging
 import os
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse, urlunparse
+from socket import gethostbyname
+from socket import gethostname
 
 
 def env(key: str, default=None):
@@ -300,6 +302,7 @@ if env_bool("ALLOW_BIND_ALL_HOSTS", False):
     _clean_allowed_hosts.append("0.0.0.0")  # nosec B104
 
 ALLOWED_HOSTS = list(dict.fromkeys(_clean_allowed_hosts))
+ALLOWED_HOSTS.append(gethostbyname(gethostname()))
 
 # Application definition
 
